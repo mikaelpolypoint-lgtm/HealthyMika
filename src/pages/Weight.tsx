@@ -21,6 +21,7 @@ export default function Weight() {
     // Editing state
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editWeight, setEditWeight] = useState('');
+    const [editDate, setEditDate] = useState(''); // New state for editing date
 
     useEffect(() => {
         const q = query(collection(db, 'weight_logs'), orderBy('date', 'desc')); // Order desc for list
@@ -64,21 +65,25 @@ export default function Weight() {
     const startEditing = (log: WeightLog) => {
         setEditingId(log.id);
         setEditWeight(log.weight.toString());
+        setEditDate(format(log.date.toDate(), "yyyy-MM-dd'T'HH:mm"));
     };
 
     const cancelEditing = () => {
         setEditingId(null);
         setEditWeight('');
+        setEditDate('');
     };
 
     const saveEdit = async (id: string) => {
         if (!editWeight) return;
         try {
             await updateDoc(doc(db, 'weight_logs', id), {
-                weight: Number(editWeight)
+                weight: Number(editWeight),
+                date: Timestamp.fromDate(new Date(editDate))
             });
             setEditingId(null);
             setEditWeight('');
+            setEditDate('');
         } catch (error) {
             console.error("Error updating document: ", error);
         }
@@ -160,7 +165,16 @@ export default function Weight() {
                                     {logs.map((log) => (
                                         <tr key={log.id} className="border-b border-slate-50 hover:bg-slate-50">
                                             <td className="px-4 py-3 font-medium text-slate-900">
-                                                {format(log.date.toDate(), 'MMM d, yyyy')}
+                                                {editingId === log.id ? (
+                                                    <input
+                                                        type="datetime-local"
+                                                        value={editDate}
+                                                        onChange={(e) => setEditDate(e.target.value)}
+                                                        className="px-2 py-1 border border-brand-accent rounded text-slate-900 text-xs w-full"
+                                                    />
+                                                ) : (
+                                                    format(log.date.toDate(), 'MMM d, yyyy')
+                                                )}
                                             </td>
                                             <td className="px-4 py-3 text-slate-500">
                                                 {format(log.date.toDate(), 'h:mm a')}

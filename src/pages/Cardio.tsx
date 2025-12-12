@@ -2,29 +2,33 @@ import { useState, useEffect } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { collection, query, orderBy, onSnapshot, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Bike, Timer, Zap, Flame, MapPin } from 'lucide-react';
+import { Bike, Timer, Flame, MapPin, Pencil, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { format } from 'date-fns';
 
 interface CardioLog {
     id: string;
-    equipment: 'Hammer Speed Race' | 'Canyon Ultimate CF 7';
+    equipment: 'Hammer Speed Race' | 'Canyon Ultimate CF 7' | 'Canyon Precede:ON' | 'Running';
     duration: number; // minutes
     distance: number; // km
     calories: number;
-    power: number; // watts
+    // power removed
     date: Timestamp;
 }
 
 export default function Cardio() {
     const [logs, setLogs] = useState<CardioLog[]>([]);
-    const [equipment, setEquipment] = useState<'Hammer Speed Race' | 'Canyon Ultimate CF 7'>('Hammer Speed Race');
+    const [equipment, setEquipment] = useState<'Hammer Speed Race' | 'Canyon Ultimate CF 7' | 'Canyon Precede:ON' | 'Running'>('Hammer Speed Race');
     const [duration, setDuration] = useState('');
     const [distance, setDistance] = useState('');
     const [calories, setCalories] = useState('');
-    const [power, setPower] = useState('');
     const [loading, setLoading] = useState(false);
+
+    // Editing State
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editForm, setEditForm] = useState<Partial<CardioLog> & { dateStr: string }>({ dateStr: '' });
 
     useEffect(() => {
         const q = query(collection(db, 'cardio_logs'), orderBy('date', 'desc'));
@@ -47,29 +51,78 @@ export default function Cardio() {
                 duration: Number(duration),
                 distance: Number(distance),
                 calories: Number(calories),
-                power: Number(power),
                 date: Timestamp.now()
             });
             setDuration('');
             setDistance('');
             setCalories('');
-            setPower('');
         } finally {
             setLoading(false);
         }
     };
 
+    // Edit Handlers
+    const startEditing = (log: CardioLog) => {
+        setEditingId(log.id);
+        setEditForm({
+            equipment: log.equipment,
+            duration: log.duration,
+            distance: log.distance,
+            calories: log.calories,
+            dateStr: format(log.date.toDate(), "yyyy-MM-dd'T'HH:mm")
+        });
+    };
+
+    const saveEdit = async () => {
+        if (!editingId) return;
+        try {
+            await updateDoc(doc(db, 'cardio_logs', editingId), {
+                equipment: editForm.equipment,
+                duration: Number(editForm.duration),
+                distance: Number(editForm.distance),
+                calories: Number(editForm.calories),
+                date: Timestamp.fromDate(new Date(editForm.dateStr))
+            });
+            setEditingId(null);
+        } catch (e) {
+            alert('Failed to update log');
+            console.error(e);
+        }
+    };
+
+    const deleteLog = async (id: string) => {
+        if (confirm('Delete this session?')) {
+            await deleteDoc(doc(db, 'cardio_logs', id));
+        }
+    };
+
+    // Helper for calculations
+    const calculateStats = (log: CardioLog | (Partial<CardioLog> & { dateStr: string })) => {
+        const dist = Number(log.distance) || 0;
+        const dur = Number(log.duration) || 0;
+
+        if (dur === 0 || dist === 0) return { speed: 0, pace: '0:00' };
+
+        const speed = (dist / (dur / 60)).toFixed(1); // km/h
+        const paceDec = dur / dist; // min/km (decimal)
+        const paceMin = Math.floor(paceDec);
+        const paceSec = Math.round((paceDec - paceMin) * 60);
+        const pace = `${paceMin}:${paceSec.toString().padStart(2, '0')}`;
+
+        return { speed, pace };
+    };
+
     const chartData = logs.slice(0, 7).reverse().map(log => ({
         date: log.date.toDate().toLocaleDateString(undefined, { weekday: 'short' }),
         distance: log.distance,
-        power: log.power
+        calories: log.calories
     }));
 
     return (
         <Layout>
             <header>
                 <h2 className="text-3xl font-bold text-brand-primary mb-2">Cardio Training</h2>
-                <p className="text-slate-500">Track your rides on the <span className="text-brand-accent font-medium">Hammer Speed Race</span> and <span className="text-purple-600 font-medium">Canyon Ultimate</span>.</p>
+                <p className="text-slate-500">Track your rides and runs.</p>
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -78,44 +131,33 @@ export default function Cardio() {
                     <CardTitle>Log Training</CardTitle>
                     <form onSubmit={handleAddLog} className="space-y-4">
                         <div className="grid grid-cols-2 gap-2 mb-4">
-                            <button
-                                type="button"
-                                onClick={() => setEquipment('Hammer Speed Race')}
-                                className={clsx(
-                                    "p-3 rounded-xl border text-sm font-medium transition-all",
-                                    equipment === 'Hammer Speed Race' ? "bg-cyan-50 border-cyan-200 text-cyan-700" : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                                )}
-                            >
-                                Hammer Speed Race
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setEquipment('Canyon Ultimate CF 7')}
-                                className={clsx(
-                                    "p-3 rounded-xl border text-sm font-medium transition-all",
-                                    equipment === 'Canyon Ultimate CF 7' ? "bg-purple-50 border-purple-200 text-purple-700" : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                                )}
-                            >
-                                Canyon Ultimate
-                            </button>
+                            {['Hammer Speed Race', 'Canyon Ultimate CF 7', 'Canyon Precede:ON', 'Running'].map((eq) => (
+                                <button
+                                    key={eq}
+                                    type="button"
+                                    onClick={() => setEquipment(eq as any)}
+                                    className={clsx(
+                                        "p-2 rounded-xl border text-xs font-medium transition-all",
+                                        equipment === eq ? "bg-cyan-50 border-cyan-200 text-cyan-700 shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                                    )}
+                                >
+                                    {eq.replace('Hammer ', '').replace('Canyon ', '')}
+                                </button>
+                            ))}
                         </div>
 
                         <div className="space-y-3">
                             <div className="relative">
                                 <Timer className="absolute left-3 top-3 text-slate-400" size={18} />
-                                <input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="Duration (min)" className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none" />
+                                <input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="Duration (min)" className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none" inputMode="decimal" />
                             </div>
                             <div className="relative">
                                 <MapPin className="absolute left-3 top-3 text-slate-400" size={18} />
-                                <input type="number" value={distance} onChange={e => setDistance(e.target.value)} placeholder="Distance (km)" className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none" />
+                                <input type="number" value={distance} onChange={e => setDistance(e.target.value)} placeholder="Distance (km)" className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none" inputMode="decimal" step="0.01" />
                             </div>
                             <div className="relative">
                                 <Flame className="absolute left-3 top-3 text-slate-400" size={18} />
-                                <input type="number" value={calories} onChange={e => setCalories(e.target.value)} placeholder="Calories (kcal)" className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none" />
-                            </div>
-                            <div className="relative">
-                                <Zap className="absolute left-3 top-3 text-slate-400" size={18} />
-                                <input type="number" value={power} onChange={e => setPower(e.target.value)} placeholder="Avg Power (Watts)" className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none" />
+                                <input type="number" value={calories} onChange={e => setCalories(e.target.value)} placeholder="Calories (kcal)" className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none" inputMode="numeric" />
                             </div>
                         </div>
 
@@ -128,18 +170,18 @@ export default function Cardio() {
                 {/* Charts & History */}
                 <div className="lg:col-span-2 space-y-6">
                     <Card>
-                        <CardTitle>Performance Trends</CardTitle>
-                        <div className="h-[300px] w-full">
+                        <CardTitle>Distance & Calories</CardTitle>
+                        <div className="h-[250px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={chartData}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                                     <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
                                     <YAxis yAxisId="left" orientation="left" stroke="#06b6d4" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
-                                    <YAxis yAxisId="right" orientation="right" stroke="#a855f7" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                                    <YAxis yAxisId="right" orientation="right" stroke="#f43f5e" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
                                     <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0', color: '#1e293b', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                                     <Legend />
-                                    <Bar yAxisId="left" dataKey="distance" name="Distance (km)" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                                    <Bar yAxisId="right" dataKey="power" name="Power (W)" fill="#a855f7" radius={[4, 4, 0, 0]} />
+                                    <Bar yAxisId="left" dataKey="distance" name="Dist (km)" fill="#06b6d4" radius={[4, 4, 0, 0]} barSize={20} />
+                                    <Bar yAxisId="right" dataKey="calories" name="Cals" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={20} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -147,33 +189,91 @@ export default function Cardio() {
 
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold text-slate-700">Recent Sessions</h3>
-                        {logs.map(log => (
-                            <div key={log.id} className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-                                <div className="flex items-center gap-4">
-                                    <div className={clsx("p-3 rounded-full", log.equipment.includes("Hammer") ? "bg-cyan-50 text-cyan-600" : "bg-purple-50 text-purple-600")}>
-                                        <Bike size={20} />
+                        {logs.map(log => {
+                            const isEditing = editingId === log.id;
+                            const { speed, pace } = calculateStats(isEditing ? editForm : log);
+
+                            if (isEditing) {
+                                return (
+                                    <div key={log.id} className="p-4 bg-blue-50/50 border border-blue-200 rounded-xl space-y-4">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-slate-500 font-bold uppercase">Date</label>
+                                                <input type="datetime-local" value={editForm.dateStr} onChange={e => setEditForm({ ...editForm, dateStr: e.target.value })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-500 font-bold uppercase">Equipment</label>
+                                                <select
+                                                    value={editForm.equipment}
+                                                    onChange={e => setEditForm({ ...editForm, equipment: e.target.value as any })}
+                                                    className="w-full p-2 bg-white rounded border border-blue-200 text-sm"
+                                                >
+                                                    <option value="Hammer Speed Race">Hammer Speed Race</option>
+                                                    <option value="Canyon Ultimate CF 7">Canyon Ultimate</option>
+                                                    <option value="Canyon Precede:ON">Canyon Precede</option>
+                                                    <option value="Running">Running</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-500 font-bold uppercase">Dist (km)</label>
+                                                <input type="number" step="0.01" value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-500 font-bold uppercase">Dur (min)</label>
+                                                <input type="number" value={editForm.duration} onChange={e => setEditForm({ ...editForm, duration: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-500 font-bold uppercase">Cals</label>
+                                                <input type="number" value={editForm.calories} onChange={e => setEditForm({ ...editForm, calories: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-end gap-3 border-t border-blue-200 pt-3">
+                                            <button onClick={() => setEditingId(null)} className="px-3 py-1 text-slate-500 hover:bg-slate-100 rounded text-sm">Cancel</button>
+                                            <button onClick={saveEdit} className="px-4 py-1 bg-blue-600 text-white rounded text-sm font-bold shadow-sm">Save Changes</button>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p className="font-medium text-slate-800">{log.equipment}</p>
-                                        <p className="text-xs text-slate-500">{log.date.toDate().toLocaleDateString()} • {log.duration} min</p>
+                                );
+                            }
+
+                            return (
+                                <div key={log.id} className="group flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                                    <div className="flex items-center gap-4 mb-3 sm:mb-0">
+                                        <div className={clsx("p-3 rounded-full", log.equipment === 'Running' ? "bg-orange-50 text-orange-600" : "bg-cyan-50 text-cyan-600")}>
+                                            <Bike size={20} />
+                                        </div>
+                                        <div>
+                                            <p className="font-medium text-slate-800">{log.equipment}</p>
+                                            <p className="text-xs text-slate-500">{log.date.toDate().toLocaleDateString()} • {format(log.date.toDate(), 'h:mm a')}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between w-full sm:w-auto gap-2 md:gap-8">
+                                        <div className="text-center sm:text-right">
+                                            <p className="text-sm font-bold text-slate-800">{log.distance} km</p>
+                                            <p className="text-xs text-slate-400">{log.duration} min</p>
+                                        </div>
+                                        <div className="text-center sm:text-right border-l border-slate-100 pl-2 sm:border-0 sm:pl-0">
+                                            <p className="text-sm font-bold text-slate-800">{log.equipment === 'Running' ? pace : speed}</p>
+                                            <p className="text-xs text-slate-400">{log.equipment === 'Running' ? 'min/km' : 'km/h'}</p>
+                                        </div>
+                                        <div className="text-center sm:text-right border-l border-slate-100 pl-2 sm:border-0 sm:pl-0">
+                                            <p className="text-sm font-bold text-slate-800">{log.calories}</p>
+                                            <p className="text-xs text-slate-400">kcal</p>
+                                        </div>
+
+                                        {/* Actions */}
+                                        <div className="flex items-center gap-1 sm:opacity-0 group-hover:opacity-100 transition-opacity ml-auto sm:ml-0">
+                                            <button onClick={() => startEditing(log)} className="p-2 text-slate-400 hover:text-brand-primary bg-slate-50 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg transition-all">
+                                                <Pencil size={16} />
+                                            </button>
+                                            <button onClick={() => deleteLog(log.id)} className="p-2 text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg transition-all">
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="flex gap-6 text-right">
-                                    <div>
-                                        <p className="text-sm font-bold text-slate-800">{log.distance} km</p>
-                                        <p className="text-xs text-slate-400">Dist</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm font-bold text-slate-800">{log.power} W</p>
-                                        <p className="text-xs text-slate-400">Power</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm font-bold text-slate-800">{log.calories}</p>
-                                        <p className="text-xs text-slate-400">Kcal</p>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             </div>

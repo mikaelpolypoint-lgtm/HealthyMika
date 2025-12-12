@@ -4,7 +4,7 @@ import { Card, CardTitle } from "../components/Ui";
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie
 } from 'recharts';
-import { Activity, Flame, Bike, Dumbbell, Apple, Scale, Calendar, Zap } from "lucide-react";
+import { Activity, Flame, Bike, Dumbbell, Apple, Scale, Calendar } from "lucide-react";
 import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { isSameDay, isSameWeek, isSameMonth, format } from 'date-fns';
@@ -314,11 +314,11 @@ export default function Dashboard() {
                     <div className="grid grid-cols-2 gap-4 mt-4">
                         <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
                             <div className="flex items-center gap-2 mb-2 text-slate-500">
-                                <Zap size={16} />
-                                <span className="text-xs font-bold uppercase">Max Power</span>
+                                <Bike size={16} />
+                                <span className="text-xs font-bold uppercase">Max Dist</span>
                             </div>
                             <p className="text-xl font-bold text-slate-800">
-                                {Math.max(...stats.filteredCardio.map(c => c.power || 0), 0)} <span className="text-xs font-normal text-slate-400">W</span>
+                                {Math.max(...stats.filteredCardio.map(c => c.distance || 0), 0)} <span className="text-xs font-normal text-slate-400">km</span>
                             </p>
                         </div>
                         <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">

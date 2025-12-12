@@ -1,7 +1,9 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity } from 'lucide-react';
+import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { signOut } from 'firebase/auth';
+import { auth } from '../firebase';
 
 const navItems = [
     { icon: LayoutDashboard, label: 'Overview', path: '/' },
@@ -21,7 +23,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <aside className="w-64 border-r border-slate-200 bg-white fixed inset-y-0 z-50 flex flex-col">
                 <div className="p-6 border-b border-slate-100">
                     <h1 className="text-2xl font-bold text-brand-primary">
-                        HealthyMika
+                        MikaFit
                     </h1>
                 </div>
 
@@ -49,12 +51,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 </nav>
 
                 <div className="p-4 border-t border-slate-100">
-                    <div className="flex items-center gap-3 px-4 py-2">
-                        <div className="w-8 h-8 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold">M</div>
-                        <div>
-                            <p className="text-sm font-bold text-slate-700">Mikael</p>
-                            <p className="text-xs text-slate-400">Pro Member</p>
+                    <div className="flex items-center justify-between px-4 py-2">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-brand-primary text-white flex items-center justify-center font-bold">
+                                {auth.currentUser?.email?.[0].toUpperCase() || 'U'}
+                            </div>
+                            <div className="overflow-hidden">
+                                <p className="text-sm font-bold text-slate-700 truncate w-32">{auth.currentUser?.email || 'User'}</p>
+                            </div>
                         </div>
+                        <button onClick={() => signOut(auth)} className="text-slate-400 hover:text-red-500 transition-colors" title="Sign Out">
+                            <LogOut size={18} />
+                        </button>
                     </div>
                 </div>
             </aside>

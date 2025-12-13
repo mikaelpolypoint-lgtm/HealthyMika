@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, deleteDoc, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Scale, Trash2, Pencil, X, Check } from 'lucide-react';
 import { format } from 'date-fns';
@@ -17,6 +17,7 @@ export default function Weight() {
     const [logs, setLogs] = useState<WeightLog[]>([]);
     const [currentWeight, setCurrentWeight] = useState('');
     const [loading, setLoading] = useState(false);
+    const [goalWeight, setGoalWeight] = useState(85); // Default
 
     // Editing state
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -24,6 +25,13 @@ export default function Weight() {
     const [editDate, setEditDate] = useState(''); // New state for editing date
 
     useEffect(() => {
+        // Fetch Settings
+        getDoc(doc(db, 'settings', 'global')).then(snap => {
+            if (snap.exists() && snap.data().targetWeight) {
+                setGoalWeight(snap.data().targetWeight);
+            }
+        });
+
         const q = query(collection(db, 'weight_logs'), orderBy('date', 'desc')); // Order desc for list
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(doc => ({
@@ -109,14 +117,14 @@ export default function Weight() {
 
     const latestWeight = chartData.length > 0 ? chartData[chartData.length - 1].weight : 91;
     const startWeight = 91;
-    const goalWeight = 85;
+    // goalWeight is now from state
     const progress = ((startWeight - latestWeight) / (startWeight - goalWeight)) * 100;
 
     return (
         <Layout>
             <header>
                 <h2 className="text-3xl font-bold text-brand-primary mb-2">Weight Tracker</h2>
-                <p className="text-slate-500">Target: <span className="text-brand-accent font-bold">85kg</span> in 2 months</p>
+                <p className="text-slate-500">Target: <span className="text-brand-accent font-bold">{goalWeight}kg</span></p>
             </header>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -125,7 +133,7 @@ export default function Weight() {
                         <div className="flex justify-between items-center mb-6">
                             <CardTitle>Progress Chart (Daily Average)</CardTitle>
                             <div className="flex gap-2">
-                                <span className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-600 border border-emerald-100 font-medium">Goal: 85kg</span>
+                                <span className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-600 border border-emerald-100 font-medium">Goal: {goalWeight}kg</span>
                             </div>
                         </div>
 
@@ -142,7 +150,7 @@ export default function Weight() {
                                     <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
                                     <YAxis domain={['dataMin - 1', 'dataMax + 1']} stroke="#94a3b8" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
                                     <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0', color: '#1e293b', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                    <ReferenceLine y={85} label="Goal" stroke="#10B981" strokeDasharray="3 3" />
+                                    <ReferenceLine y={goalWeight} label="Goal" stroke="#10B981" strokeDasharray="3 3" />
                                     <Area type="monotone" dataKey="weight" stroke="#003A59" strokeWidth={3} fill="url(#colorWeight)" />
                                 </AreaChart>
                             </ResponsiveContainer>
@@ -255,7 +263,7 @@ export default function Weight() {
                             </div>
                             <div className="flex justify-between items-center p-3 bg-white/10 rounded-lg backdrop-blur-sm">
                                 <span className="text-slate-200 text-sm">Remaining</span>
-                                <span className="text-xl font-bold text-amber-300">{(latestWeight - 85).toFixed(1)} kg</span>
+                                <span className="text-xl font-bold text-amber-300">{(latestWeight - goalWeight).toFixed(1)} kg</span>
                             </div>
                             <div className="w-full bg-white/20 rounded-full h-2.5 mt-2">
                                 <div className="bg-emerald-400 h-2.5 rounded-full" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}></div>

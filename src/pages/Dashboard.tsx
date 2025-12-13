@@ -5,9 +5,9 @@ import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie
 } from 'recharts';
 import { Activity, Flame, Bike, Dumbbell, Apple, Scale, Calendar } from "lucide-react";
-import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { isSameDay, isSameWeek, isSameMonth, format } from 'date-fns';
+import { isSameDay, isSameWeek, isSameMonth, format, subDays } from 'date-fns';
 import { clsx } from 'clsx';
 
 // Types
@@ -15,6 +15,7 @@ type Tab = 'Daily' | 'Weekly' | 'Monthly' | 'Overall';
 
 export default function Dashboard() {
     const [activeTab, setActiveTab] = useState<Tab>('Weekly');
+    const [goalWeight, setGoalWeight] = useState(85);
 
     // Data States
     const [weightLogs, setWeightLogs] = useState<any[]>([]);
@@ -24,6 +25,13 @@ export default function Dashboard() {
     const [foodLogs, setFoodLogs] = useState<any[]>([]);
 
     useEffect(() => {
+        // Fetch Settings
+        getDoc(doc(db, 'settings', 'global')).then(snap => {
+            if (snap.exists() && snap.data().targetWeight) {
+                setGoalWeight(snap.data().targetWeight);
+            }
+        });
+
         const unsubWeight = onSnapshot(query(collection(db, 'weight_logs'), orderBy('date', 'desc')), s => setWeightLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
         const unsubCardio = onSnapshot(query(collection(db, 'cardio_logs'), orderBy('date', 'desc')), s => setCardioLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
         const unsubStrength = onSnapshot(query(collection(db, 'workouts'), orderBy('date', 'desc')), s => setStrengthLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -32,6 +40,30 @@ export default function Dashboard() {
 
         return () => { unsubWeight(); unsubCardio(); unsubStrength(); unsubBodyweight(); unsubFood(); };
     }, []);
+
+    // Streak Logic
+    const streak = useMemo(() => {
+        const allLogs = [...weightLogs, ...cardioLogs, ...strengthLogs, ...bodyweightLogs, ...foodLogs];
+        const loggedDates = new Set(allLogs.map(l => format(l.date.toDate(), 'yyyy-MM-dd')));
+
+        let current = new Date();
+        let count = 0;
+
+        // If today isn't logged, check if yesterday was to maintain streak
+        if (!loggedDates.has(format(current, 'yyyy-MM-dd'))) {
+            const yesterday = subDays(current, 1);
+            if (!loggedDates.has(format(yesterday, 'yyyy-MM-dd'))) {
+                return 0;
+            }
+            current = yesterday; // Start counting from yesterday
+        }
+
+        while (loggedDates.has(format(current, 'yyyy-MM-dd'))) {
+            count++;
+            current = subDays(current, 1);
+        }
+        return count;
+    }, [weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs]);
 
     // Aggregation Logic
     const stats = useMemo(() => {
@@ -120,12 +152,123 @@ export default function Dashboard() {
         ].filter(x => x.value > 0);
     }, [stats.filteredFood]);
 
+    // Gamification Logic
+    const { xp, level, progressToNextLevel, earnedBadges, totalDist } = useMemo(() => {
+        // 1. Calculate XP
+        let totalXp = 0;
+
+        // Weight: 50 XP per log
+        totalXp += weightLogs.length * 50;
+
+        // Cardio: 10 XP per km
+        const totalDist = cardioLogs.reduce((acc, log) => acc + (log.distance || 0), 0);
+        totalXp += Math.floor(totalDist * 10);
+
+        // Strength: 5 XP per set
+        const totalSets = strengthLogs.length; // Assuming 1 doc = 1 set for now based on previous structure, or simplify to doc count
+        totalXp += strengthLogs.length * 20; // 20 XP per workout session log
+
+        // Bodyweight: 1 XP per rep/sec
+        const totalBwReps = bodyweightLogs.reduce((acc, log) => acc + (log.count || 0), 0);
+        totalXp += totalBwReps;
+
+        // Food: Green=50, Yellow=30, Orange=10, Red=5
+        const foodXp = foodLogs.reduce((acc, log) => {
+            if (log.status === 'green') return acc + 50;
+            if (log.status === 'yellow') return acc + 30;
+            if (log.status === 'orange') return acc + 10;
+            return acc + 5;
+        }, 0);
+        totalXp += foodXp;
+
+        // 2. Calculate Level
+        // Level 1: 0-1000, Level 2: 1000-2000, etc.
+        const currentLevel = Math.floor(totalXp / 1000) + 1;
+        const xpForNextLevel = currentLevel * 1000;
+        const currentLevelStart = (currentLevel - 1) * 1000;
+        const progress = ((totalXp - currentLevelStart) / (1000)) * 100;
+
+        // 3. Badges
+        const badges = [
+            { id: 'starter', name: 'Novice', desc: 'Logged your first activity', icon: '🌱', achieved: totalXp > 0 },
+            { id: 'week-warrior', name: 'Week Warrior', desc: '7 Day Streak', icon: '⚔️', achieved: streak >= 7 },
+            { id: 'marathoner', name: 'Marathoner', desc: 'Run 42km total', icon: '🏃', achieved: totalDist >= 42 },
+            { id: 'ironborn', name: 'Ironborn', desc: '50 Strength Sessions', icon: '🦾', achieved: strengthLogs.length >= 50 },
+            { id: 'clean-eater', name: 'Clean Eater', desc: '10 Great Meals', icon: '🥗', achieved: foodLogs.filter(l => l.status === 'green').length >= 10 },
+            { id: 'master', name: 'Fitness Master', desc: 'Reach Level 10', icon: '👑', achieved: currentLevel >= 10 },
+        ];
+
+        return { xp: totalXp, level: currentLevel, progressToNextLevel: progress, earnedBadges: badges, totalDist };
+    }, [weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs, streak]);
+
+    // Virtual Map Logic (Zurich -> Paris)
+    const roadTrip = useMemo(() => {
+        const totalKm = xp ? cardioLogs.reduce((acc, log) => acc + (log.distance || 0), 0) : 0;
+        const milestones = [
+            { name: 'Zurich', km: 0 },
+            { name: 'Basel', km: 85 },
+            { name: 'Mulhouse', km: 115 },
+            { name: 'Dijon', km: 335 },
+            { name: 'Paris', km: 600 } // Approx
+        ];
+
+        // Find current segment
+        let nextCity = milestones[milestones.length - 1];
+        let prevCity = milestones[0];
+
+        for (let i = 0; i < milestones.length - 1; i++) {
+            if (totalKm >= milestones[i].km && totalKm < milestones[i + 1].km) {
+                prevCity = milestones[i];
+                nextCity = milestones[i + 1];
+                break;
+            }
+        }
+
+        const segmentDist = nextCity.km - prevCity.km;
+        const distInSegment = totalKm - prevCity.km;
+        const percent = Math.min(100, Math.max(0, (distInSegment / segmentDist) * 100));
+
+        return { totalKm, prevCity, nextCity, percent };
+    }, [cardioLogs, xp]); // Re-calc when logs change
+
+    // Daily Challenge Logic
+    const dailyChallenge = useMemo(() => {
+        const challenges = [
+            { title: "Pushup Power", desc: "Do 30 pushups today", icon: <Activity size={20} /> },
+            { title: "Step It Up", desc: "Walk 10,000 steps today", icon: <Bike size={20} /> }, // Using Bike as generic cardio icon
+            { title: "Hydrate", desc: "Drink 2.5L of water", icon: <Flame size={20} /> },
+            { title: "Core Crusher", desc: "Hold a plank for 2 mins", icon: <Dumbbell size={20} /> },
+            { title: "Sugar Free", desc: "No sweets today!", icon: <Apple size={20} /> },
+        ];
+        // Simple seeded random based on date string
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        const seed = todayStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        return challenges[seed % challenges.length];
+    }, []);
+
 
     return (
         <Layout>
             <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-2">
                 <div>
-                    <h2 className="text-3xl font-bold text-brand-primary mb-1">Dashboard</h2>
+                    <div className="flex items-center gap-3">
+                        <h2 className="text-3xl font-bold text-brand-primary mb-1">Dashboard</h2>
+                        {streak > 1 && (
+                            <div className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-orange-100 to-amber-100 text-orange-600 border border-orange-200 rounded-full text-sm font-bold shadow-sm animate-pulse-slow">
+                                <Flame size={16} className="fill-orange-500 text-orange-600" />
+                                {streak} Day Streak!
+                            </div>
+                        )}
+                        {streak === 1 && (
+                            <div className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-sm font-medium">
+                                <Activity size={16} />
+                                Active Today
+                            </div>
+                        )}
+                        <div className="flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-full text-sm font-bold">
+                            <span className="text-lg">Lvl {level}</span>
+                        </div>
+                    </div>
                     <p className="text-slate-500">Your health overview. <span className="font-medium text-emerald-600">Keep pushing!</span></p>
                 </div>
 
@@ -145,6 +288,105 @@ export default function Dashboard() {
                     ))}
                 </div>
             </header>
+
+            {/* Level & Badges Row (New) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                {/* Level Card */}
+                <div className="md:col-span-2 relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white shadow-lg">
+                    <div className="relative z-10 flex items-center justify-between">
+                        <div>
+                            <p className="text-indigo-200 font-medium mb-1">Current Status</p>
+                            <h3 className="text-3xl font-bold">Level {level}</h3>
+                            <p className="text-sm text-indigo-100 mt-1">{Math.floor(xp)} XP Total</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-2xl font-bold">{Math.floor(progressToNextLevel)}%</p>
+                            <p className="text-xs text-indigo-200">to Level {level + 1}</p>
+                        </div>
+                    </div>
+                    <div className="relative z-10 mt-4 h-3 w-full rounded-full bg-black/20">
+                        <div
+                            className="h-3 rounded-full bg-gradient-to-r from-amber-300 to-yellow-400 shadow-[0_0_10px_rgba(251,191,36,0.6)] transition-all duration-1000 ease-out"
+                            style={{ width: `${progressToNextLevel}%` }}
+                        />
+                    </div>
+                    {/* Background decorations */}
+                    <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+                    <div className="absolute -left-10 -bottom-10 h-40 w-40 rounded-full bg-indigo-900/40 blur-3xl" />
+                </div>
+
+                {/* Recent Badges */}
+                <Card className="flex flex-col">
+                    <CardTitle>Badges</CardTitle>
+                    <div className="mt-4 grid grid-cols-4 gap-2">
+                        {earnedBadges.map((badge) => (
+                            <div key={badge.id} className={clsx("group relative flex flex-col items-center justify-center p-2 rounded-xl border transition-all aspect-square",
+                                badge.achieved ? "bg-amber-50 border-amber-200" : "bg-slate-50 border-slate-100 opacity-50 grayscale"
+                            )}>
+                                <span className="text-2xl mb-1">{badge.icon}</span>
+                                {badge.achieved && (
+                                    <div className="absolute opacity-0 group-hover:opacity-100 -top-12 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs p-2 rounded w-32 text-center pointer-events-none transition-opacity z-20">
+                                        <p className="font-bold">{badge.name}</p>
+                                        <p className="font-normal opacity-80">{badge.desc}</p>
+                                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-800 rotate-45"></div>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+            </div>
+
+            {/* Virtual Road Trip & Daily Challenge Row */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                {/* Map Card */}
+                <Card>
+                    <CardTitle>Virtual Road Trip (Zurich → Paris)</CardTitle>
+                    <div className="mt-4">
+                        <div className="flex justify-between items-center text-sm font-medium text-slate-700 mb-2">
+                            <span>{roadTrip.prevCity.name}</span>
+                            <span className="text-slate-400 text-xs">{(roadTrip.nextCity.km - roadTrip.prevCity.km).toFixed(0)} km segment</span>
+                            <span>{roadTrip.nextCity.name}</span>
+                        </div>
+                        <div className="relative h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                                className="absolute top-0 left-0 h-full bg-cyan-500 rounded-full transition-all duration-1000"
+                                style={{ width: `${roadTrip.percent}%` }}
+                            ></div>
+                        </div>
+                        <div className="mt-2 text-center">
+                            <p className="text-xs text-slate-500">
+                                Total Distance: <span className="font-bold text-slate-800">{roadTrip.totalKm.toFixed(1)} km</span>
+                            </p>
+                        </div>
+                    </div>
+                </Card>
+
+                {/* Daily Challenge Card */}
+                <div className="relative overflow-hidden p-6 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg">
+                    <div className="flex items-start justify-between relative z-10">
+                        <div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="px-2 py-0.5 rounded bg-white/20 text-xs font-bold uppercase tracking-wide">Daily Quest</span>
+                            </div>
+                            <h3 className="text-2xl font-bold mt-1">{dailyChallenge.title}</h3>
+                            <p className="text-emerald-100 mt-1">{dailyChallenge.desc}</p>
+                        </div>
+                        <div className="p-3 bg-white/20 rounded-xl">
+                            {dailyChallenge.icon}
+                        </div>
+                    </div>
+                    <div className="mt-6 flex gap-3 relative z-10">
+                        <button className="flex-1 bg-white text-emerald-600 font-bold py-2 rounded-lg text-sm hover:bg-emerald-50 transition-colors">
+                            Accept Challenge
+                        </button>
+                    </div>
+                    {/* Decor */}
+                    <div className="absolute -right-6 -bottom-6 text-white/10">
+                        <Activity size={120} />
+                    </div>
+                </div>
+            </div>
 
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -219,7 +461,7 @@ export default function Dashboard() {
                         <div className="flex gap-2">
                             <div className="text-right">
                                 <span className="text-xs text-slate-400 block">Goal</span>
-                                <span className="font-bold text-emerald-600">85.0 kg</span>
+                                <span className="font-bold text-emerald-600">{goalWeight.toFixed(1)} kg</span>
                             </div>
                         </div>
                     </div>

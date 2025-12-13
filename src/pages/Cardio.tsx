@@ -21,14 +21,17 @@ interface CardioLog {
 export default function Cardio() {
     const [logs, setLogs] = useState<CardioLog[]>([]);
     const [equipment, setEquipment] = useState<'Hammer Speed Race' | 'Canyon Ultimate CF 7' | 'Canyon Precede:ON' | 'Running'>('Hammer Speed Race');
-    const [duration, setDuration] = useState('');
+    // Split duration state
+    const [durationMin, setDurationMin] = useState('');
+    const [durationSec, setDurationSec] = useState('');
+
     const [distance, setDistance] = useState('');
     const [calories, setCalories] = useState('');
     const [loading, setLoading] = useState(false);
 
     // Editing State
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [editForm, setEditForm] = useState<Partial<CardioLog> & { dateStr: string }>({ dateStr: '' });
+    const [editForm, setEditForm] = useState<Partial<CardioLog> & { dateStr: string, durMin: string, durSec: string }>({ dateStr: '', durMin: '', durSec: '' });
 
     useEffect(() => {
         const q = query(collection(db, 'cardio_logs'), orderBy('date', 'desc'));
@@ -46,14 +49,17 @@ export default function Cardio() {
         e.preventDefault();
         setLoading(true);
         try {
+            const totalDuration = Number(durationMin) + (Number(durationSec) / 60);
+
             await addDoc(collection(db, 'cardio_logs'), {
                 equipment,
-                duration: Number(duration),
+                duration: totalDuration,
                 distance: Number(distance),
                 calories: Number(calories),
                 date: Timestamp.now()
             });
-            setDuration('');
+            setDurationMin('');
+            setDurationSec('');
             setDistance('');
             setCalories('');
         } finally {
@@ -64,21 +70,28 @@ export default function Cardio() {
     // Edit Handlers
     const startEditing = (log: CardioLog) => {
         setEditingId(log.id);
+        const mins = Math.floor(log.duration);
+        const secs = Math.round((log.duration - mins) * 60);
+
         setEditForm({
             equipment: log.equipment,
             duration: log.duration,
             distance: log.distance,
             calories: log.calories,
-            dateStr: format(log.date.toDate(), "yyyy-MM-dd'T'HH:mm")
+            dateStr: format(log.date.toDate(), "yyyy-MM-dd'T'HH:mm"),
+            durMin: mins.toString(),
+            durSec: secs.toString()
         });
     };
 
     const saveEdit = async () => {
         if (!editingId) return;
         try {
+            const totalDuration = Number(editForm.durMin) + (Number(editForm.durSec) / 60);
+
             await updateDoc(doc(db, 'cardio_logs', editingId), {
                 equipment: editForm.equipment,
-                duration: Number(editForm.duration),
+                duration: totalDuration,
                 distance: Number(editForm.distance),
                 calories: Number(editForm.calories),
                 date: Timestamp.fromDate(new Date(editForm.dateStr))
@@ -110,6 +123,12 @@ export default function Cardio() {
         const pace = `${paceMin}:${paceSec.toString().padStart(2, '0')}`;
 
         return { speed, pace };
+    };
+
+    const formatDuration = (totalMinutes: number) => {
+        const mins = Math.floor(totalMinutes);
+        const secs = Math.round((totalMinutes - mins) * 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
     const chartData = logs.slice(0, 7).reverse().map(log => ({
@@ -147,9 +166,25 @@ export default function Cardio() {
                         </div>
 
                         <div className="space-y-3">
-                            <div className="relative">
-                                <Timer className="absolute left-3 top-3 text-slate-400" size={18} />
-                                <input type="number" value={duration} onChange={e => setDuration(e.target.value)} placeholder="Duration (min)" className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none" inputMode="decimal" />
+                            <div className="relative flex gap-2">
+                                <div className="absolute left-3 top-3 text-slate-400 z-10"><Timer size={18} /></div>
+                                <input
+                                    type="number"
+                                    value={durationMin}
+                                    onChange={e => setDurationMin(e.target.value)}
+                                    placeholder="Min"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none"
+                                    inputMode="numeric"
+                                />
+                                <input
+                                    type="number"
+                                    value={durationSec}
+                                    onChange={e => setDurationSec(e.target.value)}
+                                    placeholder="Sec"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 px-4 text-slate-800 focus:ring-2 focus:ring-brand-primary outline-none"
+                                    inputMode="numeric"
+                                    max="59"
+                                />
                             </div>
                             <div className="relative">
                                 <MapPin className="absolute left-3 top-3 text-slate-400" size={18} />
@@ -191,7 +226,12 @@ export default function Cardio() {
                         <h3 className="text-lg font-semibold text-slate-700">Recent Sessions</h3>
                         {logs.map(log => {
                             const isEditing = editingId === log.id;
-                            const { speed, pace } = calculateStats(isEditing ? editForm : log);
+                            // Calculate stats uses 'duration' property, so we construct a temporary object for calculation
+                            const displayLog = isEditing
+                                ? { ...editForm, duration: Number(editForm.durMin) + Number(editForm.durSec) / 60 }
+                                : log;
+
+                            const { speed, pace } = calculateStats(displayLog as CardioLog);
 
                             if (isEditing) {
                                 return (
@@ -218,9 +258,15 @@ export default function Cardio() {
                                                 <label className="text-xs text-slate-500 font-bold uppercase">Dist (km)</label>
                                                 <input type="number" step="0.01" value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
                                             </div>
-                                            <div>
-                                                <label className="text-xs text-slate-500 font-bold uppercase">Dur (min)</label>
-                                                <input type="number" value={editForm.duration} onChange={e => setEditForm({ ...editForm, duration: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                            <div className="flex gap-1">
+                                                <div>
+                                                    <label className="text-xs text-slate-500 font-bold uppercase">Min</label>
+                                                    <input type="number" value={editForm.durMin} onChange={e => setEditForm({ ...editForm, durMin: e.target.value })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-slate-500 font-bold uppercase">Sec</label>
+                                                    <input type="number" value={editForm.durSec} onChange={e => setEditForm({ ...editForm, durSec: e.target.value })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                </div>
                                             </div>
                                             <div>
                                                 <label className="text-xs text-slate-500 font-bold uppercase">Cals</label>
@@ -250,7 +296,7 @@ export default function Cardio() {
                                     <div className="flex items-center justify-between w-full sm:w-auto gap-2 md:gap-8">
                                         <div className="text-center sm:text-right">
                                             <p className="text-sm font-bold text-slate-800">{log.distance} km</p>
-                                            <p className="text-xs text-slate-400">{log.duration} min</p>
+                                            <p className="text-xs text-slate-400">{formatDuration(log.duration)}</p>
                                         </div>
                                         <div className="text-center sm:text-right border-l border-slate-100 pl-2 sm:border-0 sm:pl-0">
                                             <p className="text-sm font-bold text-slate-800">{log.equipment === 'Running' ? pace : speed}</p>

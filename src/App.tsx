@@ -7,6 +7,7 @@ import Training from './pages/Training'; // Strength
 import Cardio from './pages/Cardio';
 import Food from './pages/Food';
 import Bodyweight from './pages/Bodyweight';
+import Settings from './pages/Settings';
 
 function App() {
     return (
@@ -19,6 +20,7 @@ function App() {
                 <Route path="/strength" element={<ProtectedRoute><Training /></ProtectedRoute>} />
                 <Route path="/bodyweight" element={<ProtectedRoute><Bodyweight /></ProtectedRoute>} />
                 <Route path="/food" element={<ProtectedRoute><Food /></ProtectedRoute>} />
+                <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             </Routes>
         </Router>
     );

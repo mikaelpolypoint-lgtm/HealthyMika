@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { signOut } from 'firebase/auth';
@@ -88,9 +88,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
                                 <p className="text-sm font-bold text-slate-700 truncate">{auth.currentUser?.email || 'User'}</p>
                             </div>
                         </div>
-                        <button onClick={() => signOut(auth)} className="text-slate-400 hover:text-red-500 transition-colors p-2" title="Sign Out">
-                            <LogOut size={18} />
-                        </button>
+                        <div className="flex items-center">
+                            <Link to="/settings" className="text-slate-400 hover:text-brand-primary transition-colors p-2" title="Settings">
+                                <Settings size={18} />
+                            </Link>
+                            <button onClick={() => signOut(auth)} className="text-slate-400 hover:text-red-500 transition-colors p-2" title="Sign Out">
+                                <LogOut size={18} />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </aside>

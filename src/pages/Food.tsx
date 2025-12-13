@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
-import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { clsx } from 'clsx';
-import { format, differenceInHours, differenceInMinutes, isSameDay } from 'date-fns';
-import { Pencil, Trash2, Droplets, Timer, Plus, Minus } from 'lucide-react';
+import { format, differenceInMinutes, isSameDay } from 'date-fns';
+import { Trash2, Droplets, Timer, Plus } from 'lucide-react';
 
 interface FoodLog {
     id: string;
@@ -44,10 +44,6 @@ export default function Food() {
     const [fastDate, setFastDate] = useState(format(new Date(), 'yyyy-MM-dd'));
     const [fastStart, setFastStart] = useState('20:00');
     const [fastEnd, setFastEnd] = useState('12:00');
-
-    // Edit State
-    const [editingId, setEditingId] = useState<string | null>(null);
-    const [editForm, setEditForm] = useState<{ status: FoodLog['status'], dateStr: string }>({ status: 'green', dateStr: '' });
 
     useEffect(() => {
         // Food Logs
@@ -133,26 +129,6 @@ export default function Food() {
 
     const waterGoal = 2500;
     const waterPercent = Math.min(100, (todayWater / waterGoal) * 100);
-
-    // Editing Logic
-    const startEditing = (log: FoodLog) => {
-        setEditingId(log.id);
-        setEditForm({
-            status: log.status,
-            dateStr: format(log.date.toDate(), "yyyy-MM-dd'T'HH:mm")
-        });
-    };
-
-    const saveEdit = async () => {
-        if (!editingId) return;
-        try {
-            await updateDoc(doc(db, 'food_logs', editingId), {
-                status: editForm.status,
-                date: Timestamp.fromDate(new Date(editForm.dateStr))
-            });
-            setEditingId(null);
-        } catch (e) { console.error(e); alert('Failed to update'); }
-    };
 
     const deleteLog = async (id: string) => {
         if (confirm('Delete this entry?')) { await deleteDoc(doc(db, 'food_logs', id)); }

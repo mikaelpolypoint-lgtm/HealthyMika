@@ -153,7 +153,7 @@ export default function Dashboard() {
     }, [stats.filteredFood]);
 
     // Gamification Logic
-    const { xp, level, progressToNextLevel, earnedBadges, totalDist } = useMemo(() => {
+    const { xp, level, progressToNextLevel, earnedBadges } = useMemo(() => {
         // 1. Calculate XP
         let totalXp = 0;
 
@@ -164,9 +164,8 @@ export default function Dashboard() {
         const totalDist = cardioLogs.reduce((acc, log) => acc + (log.distance || 0), 0);
         totalXp += Math.floor(totalDist * 10);
 
-        // Strength: 5 XP per set
-        const totalSets = strengthLogs.length; // Assuming 1 doc = 1 set for now based on previous structure, or simplify to doc count
-        totalXp += strengthLogs.length * 20; // 20 XP per workout session log
+        // Strength: 20 XP per workout session log
+        totalXp += strengthLogs.length * 20;
 
         // Bodyweight: 1 XP per rep/sec
         const totalBwReps = bodyweightLogs.reduce((acc, log) => acc + (log.count || 0), 0);
@@ -184,7 +183,6 @@ export default function Dashboard() {
         // 2. Calculate Level
         // Level 1: 0-1000, Level 2: 1000-2000, etc.
         const currentLevel = Math.floor(totalXp / 1000) + 1;
-        const xpForNextLevel = currentLevel * 1000;
         const currentLevelStart = (currentLevel - 1) * 1000;
         const progress = ((totalXp - currentLevelStart) / (1000)) * 100;
 
@@ -198,7 +196,7 @@ export default function Dashboard() {
             { id: 'master', name: 'Fitness Master', desc: 'Reach Level 10', icon: '👑', achieved: currentLevel >= 10 },
         ];
 
-        return { xp: totalXp, level: currentLevel, progressToNextLevel: progress, earnedBadges: badges, totalDist };
+        return { xp: totalXp, level: currentLevel, progressToNextLevel: progress, earnedBadges: badges };
     }, [weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs, streak]);
 
     // Virtual Map Logic (Zurich -> Paris)

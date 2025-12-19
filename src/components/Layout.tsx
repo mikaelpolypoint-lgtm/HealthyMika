@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings } from 'lucide-react';
+import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings, Footprints } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { signOut } from 'firebase/auth';
@@ -9,7 +9,8 @@ import { useState } from 'react';
 const navItems = [
     { icon: LayoutDashboard, label: 'Overview', path: '/' },
     { icon: Scale, label: 'Weight', path: '/weight' },
-    { icon: Bike, label: 'Cardio', path: '/cardio' },
+    { icon: Bike, label: 'Cycling', path: '/biking' },
+    { icon: Footprints, label: 'Running', path: '/running' },
     { icon: Dumbbell, label: 'Strength', path: '/strength' },
     { icon: Activity, label: 'Bodyweight', path: '/bodyweight' },
     { icon: Apple, label: 'Food', path: '/food' },

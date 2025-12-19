@@ -4,23 +4,22 @@ import { Card, CardTitle } from "../components/Ui";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Bike, Timer, Flame, MapPin, Pencil, Trash2 } from 'lucide-react';
+import { Timer, Flame, MapPin, Pencil, Trash2, Footprints } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
 
 interface CardioLog {
     id: string;
-    equipment: 'Hammer Speed Race' | 'Canyon Ultimate CF 7' | 'Canyon Precede:ON' | 'Running';
+    equipment: 'Running';
     duration: number; // minutes
     distance: number; // km
     calories: number;
-    // power removed
     date: Timestamp;
 }
 
-export default function Cardio() {
+export default function Running() {
     const [logs, setLogs] = useState<CardioLog[]>([]);
-    const [equipment, setEquipment] = useState<'Hammer Speed Race' | 'Canyon Ultimate CF 7' | 'Canyon Precede:ON' | 'Running'>('Hammer Speed Race');
+
     // Split duration state
     const [durationMin, setDurationMin] = useState('');
     const [durationSec, setDurationSec] = useState('');
@@ -36,10 +35,9 @@ export default function Cardio() {
     useEffect(() => {
         const q = query(collection(db, 'cardio_logs'), orderBy('date', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            })) as CardioLog[];
+            const data = snapshot.docs
+                .map(doc => ({ id: doc.id, ...doc.data() } as CardioLog))
+                .filter(log => log.equipment === 'Running');
             setLogs(data);
         });
         return () => unsubscribe();
@@ -52,7 +50,7 @@ export default function Cardio() {
             const totalDuration = Number(durationMin) + (Number(durationSec) / 60);
 
             await addDoc(collection(db, 'cardio_logs'), {
-                equipment,
+                equipment: 'Running',
                 duration: totalDuration,
                 distance: Number(distance),
                 calories: Number(calories),
@@ -74,7 +72,7 @@ export default function Cardio() {
         const secs = Math.round((log.duration - mins) * 60);
 
         setEditForm({
-            equipment: log.equipment,
+            equipment: 'Running',
             duration: log.duration,
             distance: log.distance,
             calories: log.calories,
@@ -90,7 +88,7 @@ export default function Cardio() {
             const totalDuration = Number(editForm.durMin) + (Number(editForm.durSec) / 60);
 
             await updateDoc(doc(db, 'cardio_logs', editingId), {
-                equipment: editForm.equipment,
+                equipment: 'Running',
                 duration: totalDuration,
                 distance: Number(editForm.distance),
                 calories: Number(editForm.calories),
@@ -114,15 +112,15 @@ export default function Cardio() {
         const dist = Number(log.distance) || 0;
         const dur = Number(log.duration) || 0;
 
-        if (dur === 0 || dist === 0) return { speed: 0, pace: '0:00' };
+        if (dur === 0 || dist === 0) return { pace: '0:00' };
 
-        const speed = (dist / (dur / 60)).toFixed(1); // km/h
+        // Pace: min/km
         const paceDec = dur / dist; // min/km (decimal)
         const paceMin = Math.floor(paceDec);
         const paceSec = Math.round((paceDec - paceMin) * 60);
         const pace = `${paceMin}:${paceSec.toString().padStart(2, '0')}`;
 
-        return { speed, pace };
+        return { pace };
     };
 
     const formatDuration = (totalMinutes: number) => {
@@ -139,33 +137,22 @@ export default function Cardio() {
 
     return (
         <Layout>
-            <header>
-                <h2 className="text-3xl font-bold text-brand-primary mb-2">Cardio Training</h2>
-                <p className="text-slate-500">Track your rides and runs.</p>
+            <header className="mb-6 flex items-center gap-3">
+                <div className="p-3 bg-orange-100 text-orange-600 rounded-xl">
+                    <Footprints size={32} />
+                </div>
+                <div>
+                    <h2 className="text-3xl font-bold text-brand-primary">Running</h2>
+                    <p className="text-slate-500">Hit the road.</p>
+                </div>
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Entry Form */}
                 <Card className="lg:col-span-1 h-fit">
-                    <CardTitle>Log Training</CardTitle>
-                    <form onSubmit={handleAddLog} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-2 mb-4">
-                            {['Hammer Speed Race', 'Canyon Ultimate CF 7', 'Canyon Precede:ON', 'Running'].map((eq) => (
-                                <button
-                                    key={eq}
-                                    type="button"
-                                    onClick={() => setEquipment(eq as any)}
-                                    className={clsx(
-                                        "p-2 rounded-xl border text-xs font-medium transition-all",
-                                        equipment === eq ? "bg-cyan-50 border-cyan-200 text-cyan-700 shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-                                    )}
-                                >
-                                    {eq.replace('Hammer ', '').replace('Canyon ', '')}
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="space-y-3">
+                    <CardTitle>Log Run</CardTitle>
+                    <form onSubmit={handleAddLog} className="space-y-6 mt-4">
+                        <div className="space-y-4">
                             <div className="relative flex gap-2">
                                 <div className="absolute left-3 top-3 text-slate-400 z-10"><Timer size={18} /></div>
                                 <input
@@ -196,8 +183,8 @@ export default function Cardio() {
                             </div>
                         </div>
 
-                        <button disabled={loading} className="w-full mt-4 bg-brand-accent hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-lg shadow-cyan-900/10">
-                            {loading ? 'Saving...' : 'Save Session'}
+                        <button disabled={loading} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-lg shadow-orange-900/10 active:scale-95">
+                            {loading ? 'Saving...' : 'Log Run'}
                         </button>
                     </form>
                 </Card>
@@ -223,96 +210,83 @@ export default function Cardio() {
                     </Card>
 
                     <div className="space-y-4">
-                        <h3 className="text-lg font-semibold text-slate-700">Recent Sessions</h3>
+                        <h3 className="text-lg font-semibold text-slate-700">Recent Runs</h3>
                         {logs.map(log => {
                             const isEditing = editingId === log.id;
-                            // Calculate stats uses 'duration' property, so we construct a temporary object for calculation
                             const displayLog = isEditing
                                 ? { ...editForm, duration: Number(editForm.durMin) + Number(editForm.durSec) / 60 }
                                 : log;
 
-                            const { speed, pace } = calculateStats(displayLog as CardioLog);
+                            const { pace } = calculateStats(displayLog as CardioLog);
 
                             if (isEditing) {
                                 return (
-                                    <div key={log.id} className="p-4 bg-blue-50/50 border border-blue-200 rounded-xl space-y-4">
+                                    <div key={log.id} className="p-4 bg-orange-50/50 border border-orange-200 rounded-xl space-y-4">
                                         <div className="grid grid-cols-2 gap-3">
                                             <div>
                                                 <label className="text-xs text-slate-500 font-bold uppercase">Date</label>
-                                                <input type="datetime-local" value={editForm.dateStr} onChange={e => setEditForm({ ...editForm, dateStr: e.target.value })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                <input type="datetime-local" value={editForm.dateStr} onChange={e => setEditForm({ ...editForm, dateStr: e.target.value })} className="w-full p-2 bg-white rounded border border-orange-200 text-sm" />
                                             </div>
-                                            <div>
-                                                <label className="text-xs text-slate-500 font-bold uppercase">Equipment</label>
-                                                <select
-                                                    value={editForm.equipment}
-                                                    onChange={e => setEditForm({ ...editForm, equipment: e.target.value as any })}
-                                                    className="w-full p-2 bg-white rounded border border-blue-200 text-sm"
-                                                >
-                                                    <option value="Hammer Speed Race">Hammer Speed Race</option>
-                                                    <option value="Canyon Ultimate CF 7">Canyon Ultimate</option>
-                                                    <option value="Canyon Precede:ON">Canyon Precede</option>
-                                                    <option value="Running">Running</option>
-                                                </select>
-                                            </div>
+                                            <div />
                                             <div>
                                                 <label className="text-xs text-slate-500 font-bold uppercase">Dist (km)</label>
-                                                <input type="number" step="0.01" value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                <input type="number" step="0.01" value={editForm.distance} onChange={e => setEditForm({ ...editForm, distance: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-orange-200 text-sm" />
                                             </div>
                                             <div className="flex gap-1">
                                                 <div>
                                                     <label className="text-xs text-slate-500 font-bold uppercase">Min</label>
-                                                    <input type="number" value={editForm.durMin} onChange={e => setEditForm({ ...editForm, durMin: e.target.value })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                    <input type="number" value={editForm.durMin} onChange={e => setEditForm({ ...editForm, durMin: e.target.value })} className="w-full p-2 bg-white rounded border border-orange-200 text-sm" />
                                                 </div>
                                                 <div>
                                                     <label className="text-xs text-slate-500 font-bold uppercase">Sec</label>
-                                                    <input type="number" value={editForm.durSec} onChange={e => setEditForm({ ...editForm, durSec: e.target.value })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                    <input type="number" value={editForm.durSec} onChange={e => setEditForm({ ...editForm, durSec: e.target.value })} className="w-full p-2 bg-white rounded border border-orange-200 text-sm" />
                                                 </div>
                                             </div>
                                             <div>
                                                 <label className="text-xs text-slate-500 font-bold uppercase">Cals</label>
-                                                <input type="number" value={editForm.calories} onChange={e => setEditForm({ ...editForm, calories: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                <input type="number" value={editForm.calories} onChange={e => setEditForm({ ...editForm, calories: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-orange-200 text-sm" />
                                             </div>
                                         </div>
-                                        <div className="flex justify-end gap-3 border-t border-blue-200 pt-3">
+                                        <div className="flex justify-end gap-3 border-t border-orange-200 pt-3">
                                             <button onClick={() => setEditingId(null)} className="px-3 py-1 text-slate-500 hover:bg-slate-100 rounded text-sm">Cancel</button>
-                                            <button onClick={saveEdit} className="px-4 py-1 bg-blue-600 text-white rounded text-sm font-bold shadow-sm">Save Changes</button>
+                                            <button onClick={saveEdit} className="px-4 py-1 bg-orange-600 text-white rounded text-sm font-bold shadow-sm">Save Changes</button>
                                         </div>
                                     </div>
                                 );
                             }
 
                             return (
-                                <div key={log.id} className="group flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-                                    <div className="flex items-center gap-4 mb-3 sm:mb-0">
-                                        <div className={clsx("p-3 rounded-full", log.equipment === 'Running' ? "bg-orange-50 text-orange-600" : "bg-cyan-50 text-cyan-600")}>
-                                            <Bike size={20} />
+                                <div key={log.id} className="group flex flex-col sm:flex-row items-center justify-between p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                                    <div className="flex items-center gap-4 w-full sm:w-auto">
+                                        <div className="w-12 h-12 rounded-full flex items-center justify-center bg-orange-50 text-orange-600 border border-orange-100 shrink-0">
+                                            <Footprints size={20} />
                                         </div>
                                         <div>
-                                            <p className="font-medium text-slate-800">{log.equipment}</p>
+                                            <p className="font-medium text-slate-800">Run</p>
                                             <p className="text-xs text-slate-500">{log.date.toDate().toLocaleDateString()} • {format(log.date.toDate(), 'h:mm a')}</p>
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center justify-between w-full sm:w-auto gap-2 md:gap-8">
+                                    <div className="flex items-center justify-between w-full sm:w-auto gap-8 mt-3 sm:mt-0">
                                         <div className="text-center sm:text-right">
                                             <p className="text-sm font-bold text-slate-800">{log.distance} km</p>
                                             <p className="text-xs text-slate-400">{formatDuration(log.duration)}</p>
                                         </div>
-                                        <div className="text-center sm:text-right border-l border-slate-100 pl-2 sm:border-0 sm:pl-0">
-                                            <p className="text-sm font-bold text-slate-800">{log.equipment === 'Running' ? pace : speed}</p>
-                                            <p className="text-xs text-slate-400">{log.equipment === 'Running' ? 'min/km' : 'km/h'}</p>
+                                        <div className="text-center sm:text-right border-l border-slate-100 pl-4 sm:border-0 sm:pl-0">
+                                            <p className="text-sm font-bold text-slate-800">{pace}</p>
+                                            <p className="text-xs text-slate-400">min/km</p>
                                         </div>
-                                        <div className="text-center sm:text-right border-l border-slate-100 pl-2 sm:border-0 sm:pl-0">
+                                        <div className="text-center sm:text-right border-l border-slate-100 pl-4 sm:border-0 sm:pl-0">
                                             <p className="text-sm font-bold text-slate-800">{log.calories}</p>
                                             <p className="text-xs text-slate-400">kcal</p>
                                         </div>
 
                                         {/* Actions */}
                                         <div className="flex items-center gap-1 sm:opacity-0 group-hover:opacity-100 transition-opacity ml-auto sm:ml-0">
-                                            <button onClick={() => startEditing(log)} className="p-2 text-slate-400 hover:text-brand-primary bg-slate-50 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg transition-all">
+                                            <button onClick={() => startEditing(log)} className="p-2 text-slate-400 hover:text-brand-primary rounded-lg transition-all">
                                                 <Pencil size={16} />
                                             </button>
-                                            <button onClick={() => deleteLog(log.id)} className="p-2 text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg transition-all">
+                                            <button onClick={() => deleteLog(log.id)} className="p-2 text-slate-400 hover:text-red-600 rounded-lg transition-all">
                                                 <Trash2 size={16} />
                                             </button>
                                         </div>

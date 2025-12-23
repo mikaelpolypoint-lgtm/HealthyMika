@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import {
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts';
-import { Activity, Flame, Bike, Dumbbell, Apple, Scale, Calendar, ChevronRight, Lock, Crown, Footprints } from "lucide-react";
+import { Activity, Bike, Dumbbell, Apple, Scale, Crown } from "lucide-react";
 import { collection, query, orderBy, onSnapshot, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { isSameDay, isSameWeek, isSameMonth, format, subDays, getHours, isWeekend } from 'date-fns';

@@ -1,9 +1,8 @@
 
-import { 
-    Flame, Zap, Trophy, Medal, Crown, Star, 
-    Footprints, Bike, Dumbbell, Wallet, 
-    Salad, Droplets, Moon, Sun, Calendar, 
-    TrendingUp, Shield, Target, Award, Heart
+import {
+    Flame, Zap, Crown,
+    Footprints, Dumbbell,
+    Salad, Moon, Sun, Calendar
 } from 'lucide-react';
 
 export type BadgeTier = 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond';
@@ -63,11 +62,11 @@ export function calculateBadges(stats: {
 
     // Helper to generate a family of badges
     const createFamily = (
-        groupId: string, 
-        nameBase: string, 
-        descTemplate: (val: number) => string, 
-        icon: any, 
-        milestones: number[], 
+        groupId: string,
+        nameBase: string,
+        descTemplate: (val: number) => string,
+        icon: any,
+        milestones: number[],
         currentValue: number
     ) => {
         milestones.forEach((target, index) => {

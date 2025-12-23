@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Timer, Flame, MapPin, Pencil, Trash2, Footprints } from 'lucide-react';
-import { clsx } from 'clsx';
+
 import { format } from 'date-fns';
 
 interface CardioLog {

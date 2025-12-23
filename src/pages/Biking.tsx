@@ -4,9 +4,9 @@ import { Card, CardTitle } from "../components/Ui";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Bike, Timer, Flame, MapPin, Pencil, Trash2, Trophy, Zap, Globe, Calendar } from 'lucide-react';
+import { Bike, Timer, Flame, MapPin, Pencil, Trash2, Trophy, Zap, Globe } from 'lucide-react';
 import { clsx } from 'clsx';
-import { format, eachDayOfInterval, subDays, isSameDay, getDay } from 'date-fns';
+import { format, eachDayOfInterval, subDays, isSameDay } from 'date-fns';
 
 // Bike Images
 import imgHammer from '../assets/bikes/hammer_speed.png';

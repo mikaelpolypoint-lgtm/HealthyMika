@@ -140,7 +140,6 @@ export default function Biking() {
 
             const time = date.getTime();
             const dateUltimate = new Date('2025-08-02T00:00:00').getTime();
-            const datePrecede = new Date('2025-10-10T00:00:00').getTime();
 
             // E-Bike is specific
             if (type === 'E-Bike-Fahren') {
@@ -221,7 +220,6 @@ export default function Biking() {
 
         setImporting(true); // Re-use importing state for loading indicator
         try {
-            const batchSize = 100;
             // Get all biking logs (equipment != Running)
             // Just use the local logs state to get IDs, safer and easier since we already fetched them
             const bikeLogs = logs;

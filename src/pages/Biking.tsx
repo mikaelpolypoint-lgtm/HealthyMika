@@ -4,7 +4,7 @@ import { Card, CardTitle } from "../components/Ui";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Bike, Timer, Flame, MapPin, Pencil, Trash2, Trophy, Zap, Globe } from 'lucide-react';
+import { Bike, Timer, Flame, MapPin, Pencil, Trash2, Trophy, Zap, Globe, Upload, Mountain } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format, eachDayOfInterval, subDays, isSameDay } from 'date-fns';
 
@@ -23,6 +23,8 @@ interface CardioLog {
     distance: number; // km
     calories: number;
     date: Timestamp;
+    elevationGain?: number;
+    elevationLoss?: number;
 }
 
 const EQUIPMENT_CONFIG: Record<EquipmentType, { image?: string; icon?: any; color: string; label: string }> = {
@@ -47,6 +49,12 @@ export default function Biking() {
     // Editing State
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<CardioLog> & { dateStr: string, durMin: string, durSec: string }>({ dateStr: '', durMin: '', durSec: '' });
+    const [importing, setImporting] = useState(false);
+
+    // Filters
+    const [filterYear, setFilterYear] = useState<string>('all');
+    const [filterBike, setFilterBike] = useState<string>('all');
+    const [filterMinDist, setFilterMinDist] = useState<string>('');
 
     useEffect(() => {
         const q = query(collection(db, 'cardio_logs'), orderBy('date', 'desc'));
@@ -59,11 +67,219 @@ export default function Biking() {
         return () => unsubscribe();
     }, []);
 
+    // Filter Logic
+    const filteredLogs = useMemo(() => {
+        return logs.filter(log => {
+            const date = log.date.toDate();
+
+            // Year Filter
+            if (filterYear !== 'all') {
+                if (date.getFullYear().toString() !== filterYear) return false;
+            }
+
+            // Bike Filter
+            if (filterBike !== 'all') {
+                if (log.equipment !== filterBike) return false;
+            }
+
+            // Min Dist Filter
+            if (filterMinDist) {
+                if (log.distance < Number(filterMinDist)) return false;
+            }
+
+            return true;
+        });
+    }, [logs, filterYear, filterBike, filterMinDist]);
+
+    const availableYears = useMemo(() => {
+        const years = new Set(logs.map(l => l.date.toDate().getFullYear()));
+        return Array.from(years).sort((a, b) => b - a);
+    }, [logs]);
+
+    const parseGarminCSV = (text: string) => {
+        const lines = text.split('\n');
+        // Simple split for headers assumes no commas in header names
+        const headers = lines[0].split(',').map(h => h.trim());
+
+        const idxDate = headers.indexOf('Datum');
+        const idxType = headers.indexOf('Aktivitätstyp');
+        const idxDist = headers.indexOf('Distanz');
+        const idxCal = headers.indexOf('Kalorien');
+        const idxDur = headers.indexOf('Zeit');
+        const idxGain = headers.indexOf('Anstieg gesamt');
+        const idxLoss = headers.indexOf('Abstieg gesamt');
+
+        const newLogs: Omit<CardioLog, 'id'>[] = [];
+
+        // Updated CSV Line Parser
+        const parseLine = (line: string) => {
+            const result: string[] = [];
+            let current = '';
+            let inQuotes = false;
+
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            result.push(current);
+            return result.map(cell => cell.replace(/^"|"$/g, '').trim());
+        };
+
+        // Mapping Logic
+        const getEquipment = (type: string, date: Date): EquipmentType => {
+            // "I got the Canyon Ultimate at the 2nd of August of 2025"
+            // "Canyon Precede on October 10th of 2025"
+            // "All earlier rides have been done with the Triban"
+
+            const time = date.getTime();
+            const dateUltimate = new Date('2025-08-02T00:00:00').getTime();
+            const datePrecede = new Date('2025-10-10T00:00:00').getTime();
+
+            // E-Bike is specific
+            if (type === 'E-Bike-Fahren') {
+                // Even if it's a couple days before the official "got it" date, it's likely the Precede
+                // checking roughly Oct 2025
+                return 'Canyon Precede:ON';
+            }
+
+            // Before getting the Ultimate (Aug 2, 2025), everything was Triban
+            if (time < dateUltimate) {
+                return 'Triban RC 520';
+            }
+
+            // After getting the Ultimate
+            if (type === 'Rennradfahren') return 'Canyon Ultimate CF 7';
+            if (type === 'Gravel/Offroad-Radfahren') return 'Triban RC 520';
+            if (type === 'Radfahren') return 'Triban RC 520'; // Defaulting generic to Triban as requested
+
+            return 'Canyon Ultimate CF 7'; // Fallback
+        };
+
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            const row = parseLine(line);
+
+            // Safety check for row length? Or just rely on undefined checks
+            const dateStr = row[idxDate];
+            const type = row[idxType];
+
+            if (!dateStr) continue;
+
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) {
+                console.warn('Invalid date parsed:', dateStr, 'in line:', line);
+                continue;
+            }
+
+            const eq = getEquipment(type, date);
+
+            // Check duplicates
+            const isDuplicate = logs.some(l =>
+                Math.abs(l.date.toDate().getTime() - date.getTime()) < 1000 &&
+                l.equipment === eq
+            );
+            if (isDuplicate) continue;
+
+            // Duration "00:20:53" -> minutes
+            const durStr = row[idxDur] || "00:00:00";
+            const [h, m, s] = durStr.split(':').map(val => Number(val) || 0);
+            const duration = (h * 60) + m + (s / 60);
+
+            // Cals "1,128" -> 1128
+            const calStr = (row[idxCal] || '').replace(/,/g, '');
+
+            // Distance "8.01"
+            const distStr = (row[idxDist] || '').replace(/,/g, '');
+
+            const elevGain = (row[idxGain] || '').replace(/,/g, '');
+            const elevLoss = (row[idxLoss] || '').replace(/,/g, '');
+
+            newLogs.push({
+                equipment: eq,
+                date: Timestamp.fromDate(date),
+                duration,
+                distance: Number(distStr),
+                calories: Number(calStr),
+                elevationGain: Number(elevGain) || 0,
+                elevationLoss: Number(elevLoss) || 0
+            });
+        }
+        return newLogs;
+    };
+
+    const handleDeleteAll = async () => {
+        if (!confirm('Are you sure you want to DELETE ALL biking logs? This cannot be undone.')) return;
+
+        setImporting(true); // Re-use importing state for loading indicator
+        try {
+            const batchSize = 100;
+            // Get all biking logs (equipment != Running)
+            // Just use the local logs state to get IDs, safer and easier since we already fetched them
+            const bikeLogs = logs;
+
+            if (bikeLogs.length === 0) {
+                alert('No logs to delete.');
+                return;
+            }
+
+            // Delete in chunks to avoid overwhelming if many
+            const deletePromises = bikeLogs.map(log => deleteDoc(doc(db, 'cardio_logs', log.id)));
+            await Promise.all(deletePromises);
+
+            alert(`Deleted ${bikeLogs.length} entries.`);
+        } catch (err) {
+            console.error(err);
+            alert('Error deleting logs.');
+        } finally {
+            setImporting(false);
+        }
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setImporting(true);
+        try {
+            const text = await file.text();
+            const newEntries = parseGarminCSV(text);
+
+            if (newEntries.length === 0) {
+                alert('No new entries found to import.');
+                return;
+            }
+
+            if (confirm(`Found ${newEntries.length} new rides. Import them?`)) {
+                // Batch add
+                // Firestore batch limit is 500, we'll do promise.all for simplicity for now as list is small-ish
+                await Promise.all(newEntries.map(entry => addDoc(collection(db, 'cardio_logs'), entry)));
+                alert(`Successfully imported ${newEntries.length} rides!`);
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Error parsing or uploading file.');
+        } finally {
+            setImporting(false);
+            // Reset input
+            e.target.value = '';
+        }
+    };
+
     // --- New Metrics Calculations ---
     const allTimeStats = useMemo(() => {
-        if (logs.length === 0) return { totalDist: 0, prDistance: 0, prSpeed: 0, prCals: 0 };
+        if (logs.length === 0) return { totalDist: 0, prDistance: 0, prSpeed: 0, prCals: 0, totalElev: 0 };
 
         const totalDist = logs.reduce((a, b) => a + (b.distance || 0), 0);
+        const totalElev = logs.reduce((a, b) => a + (b.elevationGain || 0), 0);
 
         // PRs
         const prDistance = Math.max(...logs.map(l => l.distance || 0));
@@ -75,7 +291,7 @@ export default function Biking() {
             return isFinite(val) ? val : 0;
         }));
 
-        return { totalDist, prDistance, prSpeed, prCals };
+        return { totalDist, prDistance, prSpeed, prCals, totalElev };
     }, [logs]);
 
     // --- Heatmap Logic ---
@@ -105,7 +321,9 @@ export default function Biking() {
                 duration: totalDuration,
                 distance: Number(distance),
                 calories: Number(calories),
-                date: Timestamp.now()
+                date: Timestamp.now(),
+                elevationGain: 0, // Manual entry default
+                elevationLoss: 0
             });
             setDurationMin('');
             setDurationSec('');
@@ -129,7 +347,9 @@ export default function Biking() {
             calories: log.calories,
             dateStr: format(log.date.toDate(), "yyyy-MM-dd'T'HH:mm"),
             durMin: mins.toString(),
-            durSec: secs.toString()
+            durSec: secs.toString(),
+            elevationGain: log.elevationGain,
+            elevationLoss: log.elevationLoss
         });
     };
 
@@ -143,6 +363,8 @@ export default function Biking() {
                 duration: totalDuration,
                 distance: Number(editForm.distance),
                 calories: Number(editForm.calories),
+                elevationGain: Number(editForm.elevationGain) || 0,
+                elevationLoss: Number(editForm.elevationLoss) || 0,
                 date: Timestamp.fromDate(new Date(editForm.dateStr))
             });
             setEditingId(null);
@@ -175,17 +397,69 @@ export default function Biking() {
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const chartData = logs.slice(0, 7).reverse().map(log => ({
-        date: log.date.toDate().toLocaleDateString(undefined, { weekday: 'short' }),
+    const chartData = filteredLogs.slice(0, 14).reverse().map(log => ({
+        date: log.date.toDate().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
         distance: log.distance,
         calories: log.calories
     }));
 
     return (
         <Layout>
-            <header className="mb-6">
-                <h2 className="text-3xl font-bold text-brand-primary mb-2">Cycling Training</h2>
-                <p className="text-slate-500">Choose your weapon.</p>
+            <header className="mb-6 flex flex-col md:flex-row justify-between items-end gap-4">
+                <div>
+                    <h2 className="text-3xl font-bold text-brand-primary mb-2">Cycling Training</h2>
+                    <p className="text-slate-500">Choose your weapon.</p>
+                </div>
+
+                <div className="flex gap-2 items-center flex-wrap justify-end">
+                    {/* Filters */}
+                    <div className="flex bg-white rounded-lg border border-slate-200 p-1">
+                        <select
+                            value={filterYear}
+                            onChange={e => setFilterYear(e.target.value)}
+                            className="text-sm bg-transparent border-none outline-none text-slate-600 font-bold px-2 py-1 cursor-pointer"
+                        >
+                            <option value="all">All Years</option>
+                            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="flex bg-white rounded-lg border border-slate-200 p-1">
+                        <select
+                            value={filterBike}
+                            onChange={e => setFilterBike(e.target.value)}
+                            className="text-sm bg-transparent border-none outline-none text-slate-600 font-bold px-2 py-1 cursor-pointer max-w-[150px]"
+                        >
+                            <option value="all">All Bikes</option>
+                            {(Object.keys(EQUIPMENT_CONFIG) as EquipmentType[]).map(e => <option key={e} value={e}>{EQUIPMENT_CONFIG[e].label}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="flex bg-white items-center rounded-lg border border-slate-200 p-1 px-3 gap-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase">Min km</label>
+                        <input
+                            type="number"
+                            className="w-12 text-sm bg-transparent border-none outline-none font-bold text-slate-600"
+                            placeholder="0"
+                            value={filterMinDist}
+                            onChange={e => setFilterMinDist(e.target.value)}
+                        />
+                    </div>
+
+                    <button
+                        onClick={handleDeleteAll}
+                        className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-colors text-sm font-bold"
+                        title="Delete All Bike Logs"
+                    >
+                        <Trash2 size={16} />
+                    </button>
+
+                    <label className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg cursor-pointer transition-colors text-sm font-bold">
+                        <Upload size={16} />
+                        {importing ? 'Importing...' : 'Import'}
+                        <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" disabled={importing} />
+                    </label>
+                </div>
             </header>
 
             {/* Motivation Row */}
@@ -203,7 +477,10 @@ export default function Biking() {
                             </div>
                             <div className="text-right">
                                 <p className="text-3xl font-bold text-cyan-400">{allTimeStats.totalDist.toFixed(1)} <span className="text-sm text-slate-400">km</span></p>
-                                <p className="text-xs text-slate-500">Total Distance</p>
+                                <p className="text-xs text-slate-500 mb-1">Total Distance</p>
+                                <p className="text-xs font-mono text-cyan-600 flex items-center justify-end gap-1">
+                                    <Mountain size={10} /> +{allTimeStats.totalElev.toLocaleString()}m
+                                </p>
                             </div>
                         </div>
 
@@ -422,8 +699,8 @@ export default function Biking() {
                     </Card>
 
                     <div className="space-y-4">
-                        <h3 className="text-lg font-semibold text-slate-700">Recent Sessions</h3>
-                        {logs.map(log => {
+                        <h3 className="text-lg font-semibold text-slate-700">Recent Sessions ({filteredLogs.length})</h3>
+                        {filteredLogs.map(log => {
                             const isEditing = editingId === log.id;
                             const displayLog = isEditing
                                 ? { ...editForm, duration: Number(editForm.durMin) + Number(editForm.durSec) / 60 }
@@ -433,6 +710,7 @@ export default function Biking() {
                             const eqConfig = EQUIPMENT_CONFIG[log.equipment as EquipmentType];
 
                             if (!eqConfig) return null; // Fallback
+
 
                             if (isEditing) {
                                 return (
@@ -472,6 +750,16 @@ export default function Biking() {
                                                 <label className="text-xs text-slate-500 font-bold uppercase">Cals</label>
                                                 <input type="number" value={editForm.calories} onChange={e => setEditForm({ ...editForm, calories: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
                                             </div>
+                                            <div className="flex gap-2">
+                                                <div>
+                                                    <label className="text-xs text-slate-500 font-bold uppercase">Up (m)</label>
+                                                    <input type="number" value={editForm.elevationGain} onChange={e => setEditForm({ ...editForm, elevationGain: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-slate-500 font-bold uppercase">Down</label>
+                                                    <input type="number" value={editForm.elevationLoss} onChange={e => setEditForm({ ...editForm, elevationLoss: Number(e.target.value) })} className="w-full p-2 bg-white rounded border border-blue-200 text-sm" />
+                                                </div>
+                                            </div>
                                         </div>
                                         <div className="flex justify-end gap-3 border-t border-blue-200 pt-3">
                                             <button onClick={() => setEditingId(null)} className="px-3 py-1 text-slate-500 hover:bg-slate-100 rounded text-sm">Cancel</button>
@@ -499,6 +787,12 @@ export default function Biking() {
                                     </div>
 
                                     <div className="flex items-center justify-between w-full sm:w-auto gap-4 mt-3 sm:mt-0">
+                                        {log.elevationGain ? (
+                                            <div className="text-center sm:text-right hidden md:block">
+                                                <p className="text-sm font-bold text-slate-800 flex items-center justify-end gap-0.5"><Mountain size={12} className="text-emerald-500" /> {log.elevationGain}m</p>
+                                                <p className="text-xs text-slate-400">Elevation</p>
+                                            </div>
+                                        ) : null}
                                         <div className="text-center sm:text-right">
                                             <p className="text-sm font-bold text-slate-800">{log.distance} km</p>
                                             <p className="text-xs text-slate-400">{formatDuration(log.duration)}</p>

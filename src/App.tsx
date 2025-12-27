@@ -12,6 +12,8 @@ import Strength from './pages/Strength';
 import Food from './pages/Food';
 import SettingsP from './pages/Settings';
 import Bodyweight from './pages/Bodyweight';
+import Goals from './pages/Goals';
+import Fellowship from './pages/Fellowship';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<any>(null);
@@ -36,6 +38,8 @@ export default function App() {
             <Routes>
                 <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                 <Route path="/weight" element={<ProtectedRoute><Weight /></ProtectedRoute>} />
+                <Route path="/goals" element={<ProtectedRoute><Goals /></ProtectedRoute>} />
+                <Route path="/fellowship" element={<ProtectedRoute><Fellowship /></ProtectedRoute>} />
                 <Route path="/biking" element={<ProtectedRoute><Biking /></ProtectedRoute>} />
                 <Route path="/running" element={<ProtectedRoute><Running /></ProtectedRoute>} />
                 <Route path="/strength" element={<ProtectedRoute><Strength /></ProtectedRoute>} />

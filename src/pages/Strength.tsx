@@ -15,14 +15,6 @@ interface Workout {
     date: Timestamp;
 }
 
-const workoutPlans = [
-    { name: "Full Body Blast", exercises: [{ name: "Squats", sets: "3x12" }, { name: "Bench Press", sets: "3x10" }, { name: "Rows", sets: "3x12" }] },
-    { name: "Push Power", exercises: [{ name: "Overhead Press", sets: "4x8" }, { name: "Incline Bench", sets: "3x10" }, { name: "Tricep Dips", sets: "3x15" }] },
-    { name: "Pull Performance", exercises: [{ name: "Deadlifts", sets: "3x5" }, { name: "Pullups", sets: "3xMax" }, { name: "Bicep Curls", sets: "3x12" }] },
-    { name: "Leg Day Hell", exercises: [{ name: "Lunges", sets: "3x20" }, { name: "Leg Press", sets: "4x12" }, { name: "Calf Raises", sets: "4x20" }] },
-    { name: "Core & Stability", exercises: [{ name: "Plank", sets: "3x60s" }, { name: "Russian Twists", sets: "3x20" }, { name: "Leg Raises", sets: "3x15" }] }
-];
-
 export default function Training() {
     const [workouts, setWorkouts] = useState<Workout[]>([]);
     const [exercise, setExercise] = useState('');
@@ -30,21 +22,88 @@ export default function Training() {
     const [reps, setReps] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // Roulette State
-    const [isSpinning, setIsSpinning] = useState(false);
-    const [selectedPlan, setSelectedPlan] = useState<typeof workoutPlans[0] | null>(null);
+    // Finnlo Autark 1500 Exercises
+    const EXERCISE_CATALOG = [
+        {
+            id: 'chest-press',
+            name: 'Bench Press',
+            muscle: 'Chest',
+            desc: 'Sit with back flat against pad. Push handles forward until arms are extended, then return slowly.',
+            color: 'bg-red-100 text-red-600'
+        },
+        {
+            id: 'butterfly',
+            name: 'Butterfly',
+            muscle: 'Chest',
+            desc: 'Place forearms on pads. Push arms together in front of chest, squeezing pectorals.',
+            color: 'bg-red-50 text-red-500'
+        },
+        {
+            id: 'lat-pull',
+            name: 'Lat Pulldown',
+            muscle: 'Back',
+            desc: 'Grip bar wide. Pull down to upper chest, squeezing shoulder blades together.',
+            color: 'bg-blue-100 text-blue-600'
+        },
+        {
+            id: 'rowing',
+            name: 'Seated Row',
+            muscle: 'Back',
+            desc: 'Sit facing machine. Pull handles to waist while keeping back straight.',
+            color: 'bg-blue-50 text-blue-500'
+        },
+        {
+            id: 'shoulder-press',
+            name: 'Shoulder Raise',
+            muscle: 'Shoulders',
+            desc: 'Using lower pulley, raise arm to side or front to shoulder height.',
+            color: 'bg-orange-100 text-orange-600'
+        },
+        {
+            id: 'tricep-push',
+            name: 'Triceps Pushdown',
+            muscle: 'Triceps',
+            desc: 'Grip rope/bar at chest level. Push down until arms are fully extended.',
+            color: 'bg-purple-100 text-purple-600'
+        },
+        {
+            id: 'bicep-curl',
+            name: 'Bicep Curl',
+            muscle: 'Biceps',
+            desc: 'Stand facing machine. Curl bar upwards towards chin, keeping elbows tucked.',
+            color: 'bg-purple-50 text-purple-500'
+        },
+        {
+            id: 'leg-ext',
+            name: 'Leg Extension',
+            muscle: 'Legs',
+            desc: 'Place ankles behind lower pads. Extend legs until straight.',
+            color: 'bg-emerald-100 text-emerald-600'
+        },
+        {
+            id: 'leg-curl',
+            name: 'Leg Curl',
+            muscle: 'Legs',
+            desc: 'Stand facing machine. Curl one leg back and up towards glutes.',
+            color: 'bg-emerald-50 text-emerald-500'
+        },
+        {
+            id: 'crunch',
+            name: 'Ab Crunch',
+            muscle: 'Abs',
+            desc: 'Kneel facing machine holding rope behind neck. Crunch torso downwards.',
+            color: 'bg-yellow-100 text-yellow-600'
+        }
+    ];
 
-    const spinRoulette = () => {
-        setIsSpinning(true);
-        setSelectedPlan(null);
-
-        // Simple animation effect
-        setTimeout(() => {
-            const random = Math.floor(Math.random() * workoutPlans.length);
-            setSelectedPlan(workoutPlans[random]);
-            setIsSpinning(false);
-        }, 1500);
+    const selectExercise = (ex: typeof EXERCISE_CATALOG[0]) => {
+        setExercise(ex.name);
+        // Optional: Pre-fill weight from PR or last history?
+        // Let's just set focus or smooth scroll to form if needed
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
+
+
 
     // Edit State
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -231,43 +290,28 @@ export default function Training() {
 
                 {/* Main Content Column */}
                 <div className="lg:col-span-2 flex flex-col gap-8">
-                    {/* Workout Roulette */}
-                    <Card className="h-fit border-l-4 border-l-amber-500 bg-gradient-to-br from-white to-amber-50/30">
-                        <CardTitle>Workout Roulette 🎲</CardTitle>
-                        <p className="text-sm text-slate-500 mb-4">Can't decide? Let fate choose your pain.</p>
+                    {/* Exercise Catalog */}
+                    <Card className="h-fit">
+                        <CardTitle>Exercise Catalog</CardTitle>
+                        <p className="text-sm text-slate-500 mb-4">Select an exercise to log.</p>
 
-                        {!selectedPlan ? (
-                            <div className="flex flex-col items-center justify-center py-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {EXERCISE_CATALOG.map(ex => (
                                 <button
-                                    onClick={spinRoulette}
-                                    disabled={isSpinning}
-                                    className={clsx("w-32 h-32 rounded-full border-4 border-amber-500 flex items-center justify-center bg-white shadow-xl transition-all active:scale-95 hover:bg-amber-50",
-                                        isSpinning ? "animate-spin border-dashed" : ""
-                                    )}
+                                    key={ex.id}
+                                    onClick={() => selectExercise(ex)}
+                                    className="flex items-start gap-3 p-3 rounded-xl border border-slate-100 hover:border-brand-primary/30 hover:shadow-md transition-all text-left bg-white group"
                                 >
-                                    <span className="text-3xl">🎲</span>
+                                    <div className={clsx("w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 text-lg font-bold", ex.color)}>
+                                        {ex.name.substring(0, 2)}
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-slate-800 group-hover:text-brand-primary transition-colors">{ex.name}</h4>
+                                        <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ex.desc}</p>
+                                    </div>
                                 </button>
-                                <p className="mt-4 font-bold text-amber-600">{isSpinning ? "Spinning..." : "Spin the Wheel"}</p>
-                            </div>
-                        ) : (
-                            <div className="animate-in zoom-in duration-300">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="text-xl font-bold text-slate-800">{selectedPlan.name}</h3>
-                                    <button onClick={() => setSelectedPlan(null)} className="text-xs text-slate-400 hover:text-slate-600">Reset</button>
-                                </div>
-                                <div className="space-y-3">
-                                    {selectedPlan.exercises.map((ex, i) => (
-                                        <div key={i} className="flex justify-between items-center p-2 bg-white rounded border border-amber-100">
-                                            <span className="font-medium text-slate-700">{ex.name}</span>
-                                            <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded">{ex.sets}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                                <button onClick={() => setSelectedPlan(null)} className="w-full mt-4 py-2 text-amber-600 hover:bg-amber-50 rounded text-sm font-bold">
-                                    Spin Again
-                                </button>
-                            </div>
-                        )}
+                            ))}
+                        </div>
                     </Card>
 
                     {/* History List */}

@@ -1,288 +1,356 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
-import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, setDoc, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { clsx } from 'clsx';
-import { format, differenceInMinutes, isSameDay } from 'date-fns';
-import { Trash2, Droplets, Timer, Plus } from 'lucide-react';
+import { format, subDays, eachDayOfInterval } from 'date-fns';
+import { Coffee, Wine, UtensilsCrossed, MessageSquare, Clock, Calendar as CalendarIcon, Droplets } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-interface FoodLog {
-    id: string;
-    status: 'green' | 'yellow' | 'orange' | 'red';
-    date: Timestamp;
+// --- Types ---
+interface DailyFoodLog {
+    date: string; // YYYY-MM-DD
+    eatWhenHungry: boolean; // Yes/No
+    caloriesColor: CalorieColor;
+    eatingStart: string; // HH:MM
+    eatingEnd: string; // HH:MM
+    coffees: number;
+    noAlcohol: boolean; // Yes/No
+    noSodas: boolean; // Yes/No
+    comment: string;
 }
 
-interface WaterLog {
-    id: string;
-    amount: number; // in ml
-    date: Timestamp;
-}
+type CalorieColor = 'dark-red' | 'red' | 'orange' | 'yellow' | 'light-green' | 'dark-green';
 
-interface FastingLog {
-    id: string;
-    startTime: Timestamp;
-    endTime: Timestamp;
-    date: Timestamp; // Reference date
-}
-
-const statusConfig = {
-    green: { label: 'Great', color: 'bg-green-500', hover: 'hover:bg-green-600', shadow: 'shadow-green-200', text: 'text-green-700', bg: 'bg-green-50' },
-    yellow: { label: 'Good', color: 'bg-yellow-500', hover: 'hover:bg-yellow-600', shadow: 'shadow-yellow-200', text: 'text-yellow-700', bg: 'bg-yellow-50' },
-    orange: { label: 'Fair', color: 'bg-orange-500', hover: 'hover:bg-orange-600', shadow: 'shadow-orange-200', text: 'text-orange-700', bg: 'bg-orange-50' },
-    red: { label: 'Bad', color: 'bg-red-500', hover: 'hover:bg-red-600', shadow: 'shadow-red-200', text: 'text-red-700', bg: 'bg-red-50' },
-};
+const CALORIE_COLORS: { value: CalorieColor, label: string, tw: string, hex: string }[] = [
+    { value: 'dark-green', label: 'Excellent', tw: 'bg-emerald-700', hex: '#047857' },
+    { value: 'light-green', label: 'Good', tw: 'bg-emerald-400', hex: '#34d399' },
+    { value: 'yellow', label: 'Okay', tw: 'bg-yellow-400', hex: '#facc15' },
+    { value: 'orange', label: 'High', tw: 'bg-orange-400', hex: '#fb923c' },
+    { value: 'red', label: 'Bad', tw: 'bg-red-500', hex: '#ef4444' },
+    { value: 'dark-red', label: 'Excessive', tw: 'bg-red-900', hex: '#7f1d1d' },
+];
 
 export default function Food() {
-    // State
-    const [logs, setLogs] = useState<FoodLog[]>([]);
-    const [waterLogs, setWaterLogs] = useState<WaterLog[]>([]);
-    const [fastingLogs, setFastingLogs] = useState<FastingLog[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+    const [logs, setLogs] = useState<Record<string, DailyFoodLog>>({});
 
-    // Fasting Form State
-    const [fastDate, setFastDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-    const [fastStart, setFastStart] = useState('20:00');
-    const [fastEnd, setFastEnd] = useState('12:00');
+    // Initial Form State (Default)
+    const defaultLog: DailyFoodLog = {
+        date: selectedDate,
+        eatWhenHungry: true,
+        caloriesColor: 'light-green',
+        eatingStart: '12:00',
+        eatingEnd: '20:00',
+        coffees: 0,
+        noAlcohol: true,
+        noSodas: true,
+        comment: ''
+    };
+
+    const currentLog = logs[selectedDate] || { ...defaultLog, date: selectedDate };
 
     useEffect(() => {
-        // Food Logs
-        const qFood = query(collection(db, 'food_logs'), orderBy('date', 'desc'));
-        const unsubFood = onSnapshot(qFood, (s) => setLogs(s.docs.map(d => ({ id: d.id, ...d.data() } as FoodLog))));
-
-        // Water Logs
-        const qWater = query(collection(db, 'water_logs'), orderBy('date', 'desc'));
-        const unsubWater = onSnapshot(qWater, (s) => setWaterLogs(s.docs.map(d => ({ id: d.id, ...d.data() } as WaterLog))));
-
-        // Fasting Logs
-        const qFasting = query(collection(db, 'fasting_logs'), orderBy('date', 'desc'));
-        const unsubFasting = onSnapshot(qFasting, (s) => setFastingLogs(s.docs.map(d => ({ id: d.id, ...d.data() } as FastingLog))));
-
-        return () => { unsubFood(); unsubWater(); unsubFasting(); };
+        // Load Logs (Last 60 days)
+        const qLogs = query(collection(db, 'day_food_logs'), orderBy('date', 'desc'), limit(60));
+        const unsub = onSnapshot(qLogs, (snap) => {
+            const data: Record<string, DailyFoodLog> = {};
+            snap.docs.forEach(d => {
+                data[d.id] = d.data() as DailyFoodLog;
+            });
+            setLogs(data);
+        });
+        return () => unsub();
     }, []);
 
-    // --- Actions ---
+    // --- Handlers ---
 
-    const handleLog = async (status: 'green' | 'yellow' | 'orange' | 'red') => {
-        setLoading(true);
-        try {
-            await addDoc(collection(db, 'food_logs'), { status, date: Timestamp.now() });
-        } finally { setLoading(false); }
+    const updateLog = (updates: Partial<DailyFoodLog>) => {
+        // Optimistic update logic if needed, but here we just update local form via key prop or specialized state?
+        // Actually, let's just save automatically or have a save button. 
+        // For smoother UX with a specific "Day View", auto-save is nice but "Comment" might need debounce.
+        // Let's do simple Auto-Save for toggles, and maybe onBlur for inputs.
+        // Or simpler: Just functions that save immediately to DB.
+
+        const validDate = selectedDate; // Closure capture
+        const merged = { ...currentLog, ...updates };
+
+        // Save to DB
+        setDoc(doc(db, 'day_food_logs', validDate), merged, { merge: true });
     };
 
-    const addWater = async () => {
-        try { await addDoc(collection(db, 'water_logs'), { amount: 250, date: Timestamp.now() }); } catch (e) { console.error(e); }
+    // Coffee Helpers
+    const adjustCoffee = (delta: number) => {
+        const newVal = Math.max(0, (currentLog.coffees || 0) + delta);
+        updateLog({ coffees: newVal });
     };
 
-    const removeWater = async (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
-        try { await deleteDoc(doc(db, 'water_logs', id)); } catch (e) { console.error(e); }
-    };
+    // --- Visual Data Preparation ---
+    const last14Days = useMemo(() => {
+        return eachDayOfInterval({ start: subDays(new Date(), 13), end: new Date() }).map(d => {
+            const dateStr = format(d, 'yyyy-MM-dd');
+            return {
+                date: format(d, 'dd/MM'),
+                fullDate: dateStr,
+                coffees: logs[dateStr]?.coffees || 0,
+                color: logs[dateStr]?.caloriesColor || 'gray',
+                eatingDuration: logs[dateStr] ? calculateDuration(logs[dateStr].eatingStart, logs[dateStr].eatingEnd) : 0
+            };
+        });
+    }, [logs]);
 
-    const saveFast = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        try {
-            // Construct timestamps
-            // Start is usually on 'fastDate' (e.g. yesterday evening)
-            // End is usually 'fastDate' + 1 day (e.g. today noon)
-            // But user might input for "today" meaning fast started yesterday.
-            // Let's simplify: User inputs "Date of Fast" which is the day the fast ENDED/Measured.
-
-            // Actually, simplest is: select date, select start time (could be previous day), select end time.
-            // Let's assume input is "Fast Date" (e.g. Today), and user enters Start (Yesterday 20:00) and End (Today 12:00).
-
-            const baseDate = new Date(fastDate);
-            const start = new Date(`${fastDate}T${fastStart}`);
-            const end = new Date(`${fastDate}T${fastEnd}`);
-
-            // If start > end, assume start was previous day
-            if (start > end) {
-                start.setDate(start.getDate() - 1);
-            }
-
-            await addDoc(collection(db, 'fasting_logs'), {
-                startTime: Timestamp.fromDate(start),
-                endTime: Timestamp.fromDate(end),
-                date: Timestamp.fromDate(baseDate)
-            });
-        } catch (e) {
-            console.error(e);
-            alert("Error saving fast");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const deleteFast = async (id: string) => {
-        if (confirm("Delete this fast?")) await deleteDoc(doc(db, 'fasting_logs', id));
-    };
-
-    // --- Computations ---
-
-    const todayWater = useMemo(() => {
-        const today = new Date();
-        return waterLogs
-            .filter(l => isSameDay(l.date.toDate(), today))
-            .reduce((acc, l) => acc + l.amount, 0);
-    }, [waterLogs]);
-
-    const waterGoal = 2500;
-    const waterPercent = Math.min(100, (todayWater / waterGoal) * 100);
-
-    const deleteLog = async (id: string) => {
-        if (confirm('Delete this entry?')) { await deleteDoc(doc(db, 'food_logs', id)); }
-    };
+    function calculateDuration(start: string, end: string) {
+        if (!start || !end) return 0;
+        const [h1, m1] = start.split(':').map(Number);
+        const [h2, m2] = end.split(':').map(Number);
+        let diff = (h2 + m2 / 60) - (h1 + m1 / 60);
+        if (diff < 0) diff += 24; // Handle over midnight
+        return parseFloat(diff.toFixed(1));
+    }
 
     return (
         <Layout>
-            <header className="mb-8">
-                <h2 className="text-3xl font-bold text-brand-primary mb-2">Nutrition & Fasting</h2>
-                <p className="text-slate-500">Fuel your body efficiently.</p>
+            <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                    <h2 className="text-3xl font-bold text-brand-primary mb-2">Nutrition Tracker 🍎</h2>
+                    <p className="text-slate-500">Track habits, chemicals, and calories.</p>
+                </div>
+                <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200">
+                    <CalendarIcon size={20} className="text-slate-400" />
+                    <input
+                        type="date"
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="outline-none text-slate-700 font-bold"
+                    />
+                </div>
             </header>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-                {/* 1. Water Tracker */}
-                <Card className="h-fit bg-gradient-to-br from-cyan-500 to-blue-600 text-white border-none shadow-lg shadow-blue-200">
-                    <CardTitle>
-                        <div className="text-white flex items-center gap-2">
-                            <Droplets className="fill-white" size={20} /> Hydration
-                        </div>
-                    </CardTitle>
-                    <div className="flex flex-col items-center mt-6 relative">
-                        {/* Circular Progress */}
-                        <div className="relative w-40 h-40 flex items-center justify-center">
-                            <svg className="w-full h-full transform -rotate-90">
-                                <circle cx="80" cy="80" r="70" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-blue-800/30" />
-                                <circle cx="80" cy="80" r="70" stroke="white" strokeWidth="12" fill="transparent" strokeDasharray={440} strokeDashoffset={440 - (440 * waterPercent) / 100} className="transition-all duration-1000 ease-out" strokeLinecap="round" />
-                            </svg>
-                            <div className="absolute flex flex-col items-center">
-                                <span className="text-3xl font-bold">{todayWater}</span>
-                                <span className="text-sm opacity-80">/ {waterGoal} ml</span>
-                            </div>
-                        </div>
+                {/* --- Left Column: Daily Input (lg:col-span-4) --- */}
+                <div className="lg:col-span-5 space-y-6">
 
-                        <div className="flex items-center gap-4 mt-8 w-full">
-                            <button onClick={addWater} className="flex-1 bg-white text-blue-600 py-3 rounded-xl font-bold hover:bg-blue-50 transition active:scale-95 flex items-center justify-center gap-2">
-                                <Plus size={18} /> Add 250ml
-                            </button>
-                        </div>
-                        <p className="mt-4 text-xs opacity-70 text-center">Tap logs below to remove mistaken entries.</p>
-                    </div>
+                    {/* Main Daily Form */}
+                    <Card className="border-t-4 border-t-brand-primary">
+                        <CardTitle className="mb-6 flex justify-between items-center">
+                            <span>Analysis for {format(new Date(selectedDate), 'MMM do')}</span>
+                            {/* Color Indicator Badge */}
+                            <div className={clsx("w-6 h-6 rounded-full border-2 border-white shadow-sm",
+                                CALORIE_COLORS.find(c => c.value === currentLog.caloriesColor)?.tw
+                            )} />
+                        </CardTitle>
 
-                    {/* Mini Recent Water Logs (to delete if needed) */}
-                    <div className="mt-6 flex flex-wrap gap-2 justify-center">
-                        {waterLogs.filter(l => isSameDay(l.date.toDate(), new Date())).slice(0, 5).map(l => (
-                            <button key={l.id} onClick={(e) => removeWater(e, l.id)} className="w-6 h-6 rounded-full bg-blue-400/50 hover:bg-red-400 flex items-center justify-center text-[10px] transition-colors" title="Remove">
-                                💧
-                            </button>
-                        ))}
-                    </div>
-                </Card>
+                        <div className="space-y-6">
 
-                {/* 2. Fasting Tracker */}
-                <Card className="h-fit lg:col-span-2">
-                    <CardTitle>
-                        <div className="flex items-center gap-2 mb-4">
-                            <Timer className="text-purple-600" size={20} /> Intermittent Fasting
-                        </div>
-                    </CardTitle>
-
-                    {/* Fasting Form */}
-                    <form onSubmit={saveFast} className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                            {/* 1. Calories Color */}
                             <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase">Fast Date</label>
-                                <input type="date" required value={fastDate} onChange={e => setFastDate(e.target.value)} className="w-full mt-1 p-2 border rounded-lg bg-white" />
-                            </div>
-                            <div className="flex gap-2">
-                                <div className="flex-1">
-                                    <label className="text-xs font-bold text-slate-500 uppercase">Start Time</label>
-                                    <input type="time" required value={fastStart} onChange={e => setFastStart(e.target.value)} className="w-full mt-1 p-2 border rounded-lg bg-white" />
+                                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Total Calories & Quality</label>
+                                <div className="grid grid-cols-6 gap-2">
+                                    {CALORIE_COLORS.map((c) => (
+                                        <button
+                                            key={c.value}
+                                            onClick={() => updateLog({ caloriesColor: c.value })}
+                                            className={clsx(
+                                                "h-10 rounded-lg transition-all duration-200 hover:scale-105",
+                                                c.tw,
+                                                currentLog.caloriesColor === c.value ? "ring-2 ring-offset-2 ring-slate-400 scale-105 shadow-md" : "opacity-40 hover:opacity-100"
+                                            )}
+                                            title={c.label}
+                                        />
+                                    ))}
                                 </div>
-                                <div className="flex-1">
-                                    <label className="text-xs font-bold text-slate-500 uppercase">End Time</label>
-                                    <input type="time" required value={fastEnd} onChange={e => setFastEnd(e.target.value)} className="w-full mt-1 p-2 border rounded-lg bg-white" />
+                                <p className="text-right text-xs text-slate-400 mt-1 font-bold">{CALORIE_COLORS.find(c => c.value === currentLog.caloriesColor)?.label}</p>
+                            </div>
+
+                            {/* 2. Eating Time */}
+                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                <label className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase mb-3">
+                                    <Clock size={16} /> Eating Window
+                                </label>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex-1">
+                                        <span className="text-[10px] uppercase font-bold text-slate-400">Start</span>
+                                        <input
+                                            type="time"
+                                            value={currentLog.eatingStart}
+                                            onChange={(e) => updateLog({ eatingStart: e.target.value })}
+                                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-bold outline-none focus:border-brand-primary"
+                                        />
+                                    </div>
+                                    <span className="text-slate-300 mt-4">→</span>
+                                    <div className="flex-1">
+                                        <span className="text-[10px] uppercase font-bold text-slate-400">End</span>
+                                        <input
+                                            type="time"
+                                            value={currentLog.eatingEnd}
+                                            onChange={(e) => updateLog({ eatingEnd: e.target.value })}
+                                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-bold outline-none focus:border-brand-primary"
+                                        />
+                                    </div>
+                                </div>
+                                <p className="text-right text-xs text-brand-primary mt-2 font-bold">
+                                    Total: {calculateDuration(currentLog.eatingStart, currentLog.eatingEnd)} hrs
+                                </p>
+                            </div>
+
+                            {/* 3. Toggles Grid */}
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Eat When Hungry */}
+                                <button
+                                    onClick={() => updateLog({ eatWhenHungry: !currentLog.eatWhenHungry })}
+                                    className={clsx("p-3 rounded-xl border flex flex-col items-center gap-2 transition-all",
+                                        currentLog.eatWhenHungry ? "bg-emerald-50 border-emerald-200" : "bg-white border-slate-200 opacity-60"
+                                    )}
+                                >
+                                    <UtensilsCrossed size={20} className={currentLog.eatWhenHungry ? "text-emerald-600" : "text-slate-400"} />
+                                    <span className={clsx("text-xs font-bold", currentLog.eatWhenHungry ? "text-emerald-700" : "text-slate-500")}>
+                                        Hungry Only? {currentLog.eatWhenHungry ? "Yes" : "No"}
+                                    </span>
+                                </button>
+
+                                {/* No Sodas */}
+                                <button
+                                    onClick={() => updateLog({ noSodas: !currentLog.noSodas })}
+                                    className={clsx("p-3 rounded-xl border flex flex-col items-center gap-2 transition-all",
+                                        currentLog.noSodas ? "bg-blue-50 border-blue-200" : "bg-white border-slate-200 opacity-60"
+                                    )}
+                                >
+                                    <Droplets size={20} className={currentLog.noSodas ? "text-blue-600" : "text-slate-400"} />
+                                    <span className={clsx("text-xs font-bold", currentLog.noSodas ? "text-blue-700" : "text-slate-500")}>
+                                        No Sodas? {currentLog.noSodas ? "Yes" : "No"}
+                                    </span>
+                                </button>
+
+                                {/* No Alcohol */}
+                                <button
+                                    onClick={() => updateLog({ noAlcohol: !currentLog.noAlcohol })}
+                                    className={clsx("p-3 rounded-xl border flex flex-col items-center gap-2 transition-all",
+                                        currentLog.noAlcohol ? "bg-purple-50 border-purple-200" : "bg-white border-slate-200 opacity-60"
+                                    )}
+                                >
+                                    <Wine size={20} className={currentLog.noAlcohol ? "text-purple-600" : "text-slate-400"} />
+                                    <span className={clsx("text-xs font-bold", currentLog.noAlcohol ? "text-purple-700" : "text-slate-500")}>
+                                        No Alcohol? {currentLog.noAlcohol ? "Yes" : "No"}
+                                    </span>
+                                </button>
+
+                                {/* Coffee Counter */}
+                                <div className="p-3 rounded-xl border border-amber-100 bg-amber-50 flex flex-col items-center justify-between">
+                                    <span className="text-xs font-bold text-amber-700 uppercase flex items-center gap-1"><Coffee size={14} /> Coffees</span>
+                                    <div className="flex items-center gap-3 mt-2">
+                                        <button onClick={() => adjustCoffee(-1)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full shadow text-amber-600 hover:bg-amber-100 font-bold">-</button>
+                                        <span className="text-xl font-bold text-amber-800">{currentLog.coffees}</span>
+                                        <button onClick={() => adjustCoffee(1)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full shadow text-amber-600 hover:bg-amber-100 font-bold">+</button>
+                                    </div>
                                 </div>
                             </div>
-                            <button type="submit" disabled={loading} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition">
-                                Log Fast
-                            </button>
+
+                            {/* 4. Comment */}
+                            <div>
+                                <label className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase mb-2">
+                                    <MessageSquare size={16} /> Comments
+                                </label>
+                                <textarea
+                                    value={currentLog.comment}
+                                    onChange={(e) => updateLog({ comment: e.target.value })}
+                                    placeholder="What did you eat today? How do you feel?"
+                                    className="w-full h-24 p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:ring-2 ring-brand-primary placeholder:text-slate-400"
+                                />
+                            </div>
+
                         </div>
-                        <p className="text-xs text-slate-400 mt-2">*If Start Time is greater than End Time (e.g. 20:00 {'>'} 12:00), it assumes Start was the previous day.</p>
-                    </form>
+                    </Card>
+                </div>
 
-                    {/* Fasting History */}
-                    <div className="space-y-3">
-                        {fastingLogs.map(log => {
-                            const start = log.startTime.toDate();
-                            const end = log.endTime.toDate();
-                            const hours = (differenceInMinutes(end, start) / 60).toFixed(1);
+                {/* --- Right Column: Visualization (lg:col-span-8) --- */}
+                <div className="lg:col-span-7 space-y-6">
 
-                            return (
-                                <div key={log.id} className="group flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:border-purple-200 hover:shadow-sm transition bg-white">
-                                    <div className="flex items-center gap-4">
-                                        <div className="p-2 bg-purple-50 text-purple-600 rounded-lg">
-                                            <Timer size={18} />
-                                        </div>
-                                        <div>
-                                            <span className="font-bold text-slate-700 text-lg">{hours}h</span>
-                                            <div className="text-xs text-slate-500 flex gap-2">
-                                                <span>{format(start, 'MMM d, HH:mm')}</span>
-                                                <span>→</span>
-                                                <span>{format(end, 'HH:mm')}</span>
-                                            </div>
+                    {/* 1. Monthly Overview (Heatmap-ish Grid) */}
+                    <Card>
+                        <CardTitle>Last 30 Days Quality</CardTitle>
+                        <div className="grid grid-cols-7 sm:grid-cols-10 gap-2 mt-4">
+                            {eachDayOfInterval({ start: subDays(new Date(), 29), end: new Date() }).map(day => {
+                                const dStr = format(day, 'yyyy-MM-dd');
+                                const log = logs[dStr];
+                                const color = log ? CALORIE_COLORS.find(c => c.value === log.caloriesColor) : null;
+
+                                return (
+                                    <div key={dStr} onClick={() => setSelectedDate(dStr)} className="flex flex-col items-center gap-1 group relative cursor-pointer hover:scale-110 transition-transform">
+                                        <div
+                                            className={clsx(
+                                                "w-full aspect-square rounded-md transition-all",
+                                                color ? color.tw : "bg-slate-100 border border-slate-200",
+                                                selectedDate === dStr && "ring-2 ring-brand-primary ring-offset-1"
+                                            )}
+                                        />
+                                        <span className={clsx("text-[10px] font-mono", selectedDate === dStr ? "text-brand-primary font-bold" : "text-slate-400")}>{format(day, 'd')}</span>
+
+                                        {/* Tooltip */}
+                                        <div className="absolute bottom-full mb-2 hidden group-hover:block bg-slate-800 text-white text-xs p-2 rounded z-10 whitespace-nowrap">
+                                            {format(day, 'MMM do')}: {color?.label || 'No Data'}
                                         </div>
                                     </div>
-                                    <button onClick={() => deleteFast(log.id)} className="opacity-0 group-hover:opacity-100 p-2 text-slate-400 hover:text-red-500 transition">
-                                        <Trash2 size={16} />
-                                    </button>
-                                </div>
-                            )
-                        })}
-                        {fastingLogs.length === 0 && <p className="text-center text-slate-400 my-4">No fasts recorded.</p>}
-                    </div>
-                </Card>
-
-                {/* 3. Food Quality (Existing) */}
-                <Card className="flex flex-col justify-center items-center py-8 h-fit lg:col-span-3">
-                    <CardTitle>Meal Quality Tracker</CardTitle>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-8 w-full max-w-2xl px-4">
-                        {(Object.keys(statusConfig) as Array<keyof typeof statusConfig>).map((status) => (
-                            <button
-                                key={status}
-                                disabled={loading}
-                                onClick={() => handleLog(status)}
-                                className={clsx(
-                                    "aspect-square rounded-2xl flex flex-col items-center justify-center transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50",
-                                    statusConfig[status].color,
-                                    statusConfig[status].hover,
-                                    "shadow-lg",
-                                    statusConfig[status].shadow
-                                )}
-                            >
-                                <span className="text-xl font-bold text-white drop-shadow-md">{statusConfig[status].label}</span>
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* Brief Recent Food History */}
-                    <div className="mt-8 w-full border-t border-slate-100 pt-6">
-                        <h4 className="text-sm font-bold text-slate-400 uppercase mb-3 text-center">Recent Meals</h4>
-                        <div className="flex flex-wrap gap-2 justify-center">
-                            {logs.slice(0, 8).map(log => (
-                                <div key={log.id}
-                                    className={clsx("px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-2",
-                                        statusConfig[log.status].bg, statusConfig[log.status].text, "border-transparent"
-                                    )}>
-                                    <span>{format(log.date.toDate(), 'dd/MM HH:mm')}</span>
-                                    <button onClick={() => deleteLog(log.id)} className="hover:text-red-600"><Trash2 size={10} /></button>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
+                    </Card>
+
+                    {/* 2. Coffee & Eating Time Chart */}
+                    <Card className="h-80">
+                        <CardTitle>Coffee & Fasting Trends</CardTitle>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={last14Days} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                                <YAxis yAxisId="coffee" orientation="left" stroke="#d97706" tick={{ fontSize: 10 }} width={30} label={{ value: 'Cups', angle: -90, position: 'insideLeft', fontSize: 10, fill: '#d97706' }} />
+                                <YAxis yAxisId="duration" orientation="right" stroke="#6366f1" tick={{ fontSize: 10 }} width={30} domain={[0, 16]} label={{ value: 'Eating Hours', angle: 90, position: 'insideRight', fontSize: 10, fill: '#6366f1' }} />
+                                <Tooltip
+                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                />
+                                <Bar yAxisId="coffee" dataKey="coffees" name="Coffees" fill="#fbbf24" radius={[4, 4, 0, 0]} barSize={20} />
+                                <Bar yAxisId="duration" dataKey="eatingDuration" name="Eating Window (h)" fill="#818cf8" radius={[4, 4, 0, 0]} barSize={20} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </Card>
+
+                    {/* 3. Streaks / Stats */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {/* No Soda Streak (Simple calculation: simplified to count in last 30 days for robustness vs strict streak) */}
+                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-center">
+                            <h4 className="text-xs font-bold text-blue-400 uppercase">Soda Free</h4>
+                            <p className="text-2xl font-bold text-blue-700 mt-1">
+                                {Object.values(logs).filter(l => l.noSodas).length} <span className="text-sm font-normal opacity-70">days</span>
+                            </p>
+                            <p className="text-[10px] text-blue-400 mt-1">Total Recorded</p>
+                        </div>
+
+                        <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 text-center">
+                            <h4 className="text-xs font-bold text-purple-400 uppercase">Alcohol Free</h4>
+                            <p className="text-2xl font-bold text-purple-700 mt-1">
+                                {Object.values(logs).filter(l => l.noAlcohol).length} <span className="text-sm font-normal opacity-70">days</span>
+                            </p>
+                            <p className="text-[10px] text-purple-400 mt-1">Total Recorded</p>
+                        </div>
+
+                        <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 text-center">
+                            <h4 className="text-xs font-bold text-emerald-400 uppercase">Hungry Only</h4>
+                            <p className="text-2xl font-bold text-emerald-700 mt-1">
+                                {Object.values(logs).filter(l => l.eatWhenHungry).length} <span className="text-sm font-normal opacity-70">days</span>
+                            </p>
+                            <p className="text-[10px] text-emerald-400 mt-1">Total Recorded</p>
+                        </div>
+
+                        <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 text-center">
+                            <h4 className="text-xs font-bold text-amber-400 uppercase">Total Coffee</h4>
+                            <p className="text-2xl font-bold text-amber-700 mt-1">
+                                {Object.values(logs).reduce((a, b) => a + (b.coffees || 0), 0)} <span className="text-sm font-normal opacity-70">cups</span>
+                            </p>
+                            <p className="text-[10px] text-amber-400 mt-1">Total Recorded</p>
+                        </div>
+
                     </div>
-                </Card>
+                </div>
 
             </div>
         </Layout>

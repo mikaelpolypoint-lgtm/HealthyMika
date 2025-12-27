@@ -12,9 +12,9 @@ export default defineConfig({
             registerType: 'autoUpdate',
             includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
             manifest: {
-                name: 'MikaFit - HealthyMika',
-                short_name: 'MikaFit',
-                description: 'Personal Fitness Tracker for Mikael',
+                name: 'MiKI Life',
+                short_name: 'MiKI Life',
+                description: 'Personal Fitness Tracker',
                 theme_color: '#ffffff',
                 icons: [
                     {

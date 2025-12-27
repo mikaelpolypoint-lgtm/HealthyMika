@@ -33,7 +33,7 @@ export default function Login() {
             <Card className="w-full max-w-md p-8">
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-brand-primary mb-2">Welcome Back</h1>
-                    <p className="text-slate-500">Sign in to access your MikaFit dashboard.</p>
+                    <p className="text-slate-500">Sign in to access your MiKI Life dashboard.</p>
                 </div>
 
                 {error && (

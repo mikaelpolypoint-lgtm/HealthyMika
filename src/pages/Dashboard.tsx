@@ -4,10 +4,10 @@ import { Card, CardTitle } from "../components/Ui";
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts';
-import { Activity, Bike, Dumbbell, Apple, Scale, Crown } from "lucide-react";
+import { Activity, Bike, Dumbbell, Apple, Scale, Crown, Heart, BookOpen, Calendar } from "lucide-react";
 import { collection, query, orderBy, onSnapshot, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { isSameDay, isSameWeek, isSameMonth, format, subDays, getHours, isWeekend } from 'date-fns';
+import { isSameDay, isSameWeek, isSameMonth, format, subDays, getHours, isWeekend, isSunday, startOfWeek, endOfWeek } from 'date-fns';
 import { clsx } from 'clsx';
 import { calculateBadges } from '../utils/gamification';
 import type { BadgeDef } from '../utils/gamification';
@@ -26,6 +26,11 @@ export default function Dashboard() {
     const [bodyweightLogs, setBodyweightLogs] = useState<any[]>([]);
     const [foodLogs, setFoodLogs] = useState<any[]>([]);
 
+    // New Data States for Fellowship & Sunday Review
+    const [dailyGoalsLogs, setDailyGoalsLogs] = useState<any[]>([]);
+    const [fellowshipLogs, setFellowshipLogs] = useState<any[]>([]);
+    const [prayerCardsLogs, setPrayerCardsLogs] = useState<any[]>([]);
+
     useEffect(() => {
         // Fetch Settings
         getDoc(doc(db, 'settings', 'global')).then(snap => {
@@ -40,7 +45,15 @@ export default function Dashboard() {
         const unsubBodyweight = onSnapshot(query(collection(db, 'bodyweight_logs'), orderBy('date', 'desc')), s => setBodyweightLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
         const unsubFood = onSnapshot(query(collection(db, 'food_logs'), orderBy('date', 'desc')), s => setFoodLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
 
-        return () => { unsubWeight(); unsubCardio(); unsubStrength(); unsubBodyweight(); unsubFood(); };
+        // Fellowship Data
+        const unsubDailyGoals = onSnapshot(collection(db, 'daily_goals'), s => setDailyGoalsLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        const unsubFellowship = onSnapshot(collection(db, 'fellowship_logs'), s => setFellowshipLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        const unsubPrayerCards = onSnapshot(collection(db, 'prayer_cards'), s => setPrayerCardsLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+        return () => {
+            unsubWeight(); unsubCardio(); unsubStrength(); unsubBodyweight(); unsubFood();
+            unsubDailyGoals(); unsubFellowship(); unsubPrayerCards();
+        };
     }, []);
 
     // Streak Logic
@@ -139,6 +152,56 @@ export default function Dashboard() {
         };
     }, [activeTab, weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs]);
 
+    // Sunday Review Logic
+    const sundayReview = useMemo(() => {
+        const today = new Date();
+        const isTodaySunday = isSunday(today); // Only show if today is Sunday
+
+        // Always calculate for "current week" (which ends on Sunday)
+        if (!isTodaySunday) return null;
+
+        const start = startOfWeek(today, { weekStartsOn: 1 });
+        const end = endOfWeek(today, { weekStartsOn: 1 });
+
+        // Filter logs for this week
+        const weekFood = foodLogs.filter(l => {
+            const d = l.date.toDate();
+            return d >= start && d <= end;
+        });
+        const greenDays = weekFood.filter(l => l.status === 'green').length;
+
+        const weekWorkouts = strengthLogs.filter(l => {
+            const d = l.date.toDate();
+            return d >= start && d <= end;
+        }).length;
+
+        // Daily Goals (Jesus Start) - stored by ID 'YYYY-MM-DD'
+        let jesusStarts = 0;
+        dailyGoalsLogs.forEach(log => {
+            const date = new Date(log.id);
+            if (date >= start && date <= end && log.jesus) {
+                jesusStarts++;
+            }
+        });
+
+        // Chapters Read
+        let chaptersRead = 0;
+        fellowshipLogs.forEach(log => {
+            const date = new Date(log.id); // ID is YYYY-MM-DD
+            if (date >= start && date <= end) {
+                chaptersRead += (log.chaptersRead?.length || 0);
+            }
+        });
+
+        return {
+            greenDays,
+            weekWorkouts,
+            jesusStarts,
+            chaptersRead
+        };
+    }, [foodLogs, strengthLogs, dailyGoalsLogs, fellowshipLogs]);
+
+
     // Gamification & Badges
     const gamification = useMemo(() => {
         // 1. Calculate XP
@@ -157,6 +220,11 @@ export default function Dashboard() {
         }, 0);
         totalXp += foodXp;
 
+        // Add Fellowship XP
+        const totalChapters = fellowshipLogs.reduce((acc, log) => acc + (log.chaptersRead?.length || 0), 0);
+        totalXp += totalChapters * 10; // 10 XP per chapter
+        totalXp += prayerCardsLogs.length * 25; // 25 XP per prayer card created
+
         const level = Math.floor(totalXp / 1000) + 1;
         const currentLevelStart = (level - 1) * 1000;
         const progressToNextLevel = ((totalXp - currentLevelStart) / (1000)) * 100;
@@ -166,18 +234,13 @@ export default function Dashboard() {
         const totalGreenFood = foodLogs.filter(l => l.status === 'green').length;
 
         // Time based stats
-        let earlyBird = 0;
-        let nightOwl = 0;
-        let weekend = 0;
-
+        let earlyBird = 0, nightOwl = 0, weekend = 0;
         const processTime = (d: Date) => {
             const h = getHours(d);
             if (h >= 4 && h < 9) earlyBird++;
             if (h >= 20 || h < 2) nightOwl++;
             if (isWeekend(d)) weekend++;
         };
-
-        // Gather all dates
         const allLogDates: Date[] = [
             ...weightLogs.map(l => l.date.toDate()),
             ...cardioLogs.map(l => l.date.toDate()),
@@ -185,7 +248,6 @@ export default function Dashboard() {
             ...bodyweightLogs.map(l => l.date.toDate()),
             ...foodLogs.map(l => l.date.toDate())
         ];
-
         allLogDates.forEach(d => processTime(d));
 
         const badgeList = calculateBadges({
@@ -197,33 +259,27 @@ export default function Dashboard() {
             totalBwReps,
             earlyBirdCount: earlyBird,
             nightOwlCount: nightOwl,
-            weekendCount: weekend
+            weekendCount: weekend,
+            totalChaptersRead: totalChapters,
+            totalPrayerCards: prayerCardsLogs.length
         });
 
         // Group Badges by ID to show only relevant ones (Highest Earned + Next Target)
         const badgeGroups: Record<string, { earned: BadgeDef | null; next: BadgeDef | null }> = {};
-
         badgeList.forEach(b => {
             if (!badgeGroups[b.groupId]) badgeGroups[b.groupId] = { earned: null, next: null };
-
             if (b.isEarned) {
                 const current = badgeGroups[b.groupId].earned;
-                // Assuming list sorted by difficulty (or we just check target value)
-                if (!current || (b.target || 0) > (current.target || 0)) {
-                    badgeGroups[b.groupId].earned = b;
-                }
+                if (!current || (b.target || 0) > (current.target || 0)) badgeGroups[b.groupId].earned = b;
             } else {
                 const currentNext = badgeGroups[b.groupId].next;
-                if (!currentNext || (b.target || 0) < (currentNext.target || 0)) {
-                    badgeGroups[b.groupId].next = b;
-                }
+                if (!currentNext || (b.target || 0) < (currentNext.target || 0)) badgeGroups[b.groupId].next = b;
             }
         });
-
         const displayBadges = Object.values(badgeGroups).map(g => g.earned || g.next).filter(Boolean) as BadgeDef[];
 
         return { xp: totalXp, level, progressToNextLevel, badgeList, displayBadges };
-    }, [weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs, streak]);
+    }, [weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs, streak, fellowshipLogs, prayerCardsLogs]);
 
     // Chart Data
     const weightChartData = useMemo(() => {
@@ -244,6 +300,48 @@ export default function Dashboard() {
 
     return (
         <Layout>
+            {/* Sunday Review Card - Only shows on Sunday */}
+            {sundayReview && (
+                <div className="mb-8 animate-in slide-in-from-top-4 duration-700">
+                    <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-1 shadow-lg">
+                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 text-white">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-3 bg-white/20 rounded-full">
+                                    <Calendar className="text-white" size={24} />
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-bold">Sunday Review</h2>
+                                    <p className="text-indigo-100">Weekly reflection & progress check.</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="bg-white/10 rounded-lg p-4 text-center">
+                                    <Heart className="w-6 h-6 mx-auto mb-2 text-pink-300" />
+                                    <div className="text-2xl font-bold">{sundayReview.jesusStarts}/7</div>
+                                    <div className="text-xs text-indigo-100 uppercase tracking-wide opacity-80">Started with Jesus</div>
+                                </div>
+                                <div className="bg-white/10 rounded-lg p-4 text-center">
+                                    <BookOpen className="w-6 h-6 mx-auto mb-2 text-amber-300" />
+                                    <div className="text-2xl font-bold">{sundayReview.chaptersRead}</div>
+                                    <div className="text-xs text-indigo-100 uppercase tracking-wide opacity-80">Chapters Read</div>
+                                </div>
+                                <div className="bg-white/10 rounded-lg p-4 text-center">
+                                    <Apple className="w-6 h-6 mx-auto mb-2 text-emerald-300" />
+                                    <div className="text-2xl font-bold">{sundayReview.greenDays}</div>
+                                    <div className="text-xs text-indigo-100 uppercase tracking-wide opacity-80">Clean Eating Days</div>
+                                </div>
+                                <div className="bg-white/10 rounded-lg p-4 text-center">
+                                    <Dumbbell className="w-6 h-6 mx-auto mb-2 text-cyan-300" />
+                                    <div className="text-2xl font-bold">{sundayReview.weekWorkouts}</div>
+                                    <div className="text-xs text-indigo-100 uppercase tracking-wide opacity-80">Workouts</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-2">
                 <div>
                     <h2 className="text-3xl font-bold text-brand-primary mb-1">Dashboard</h2>
@@ -292,9 +390,6 @@ export default function Dashboard() {
                             </div>
                         </div>
                     </div>
-                    {/* Background decorations */}
-                    <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/5 blur-3xl" />
-                    <div className="absolute -left-10 -bottom-10 h-40 w-40 rounded-full bg-indigo-500/20 blur-3xl" />
                 </div>
 
                 {/* Badge Showcase */}

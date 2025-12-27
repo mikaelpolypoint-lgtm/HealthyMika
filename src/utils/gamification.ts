@@ -1,8 +1,8 @@
-
 import {
     Flame, Zap, Crown,
     Footprints, Dumbbell,
-    Salad, Moon, Sun, Calendar
+    Salad, Moon, Sun, Calendar,
+    Heart, BookOpen
 } from 'lucide-react';
 
 export type BadgeTier = 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond';
@@ -46,6 +46,11 @@ const EARLY_MILESTONES = [5, 20, 50, 100, 200];
 const NIGHT_MILESTONES = [5, 20, 50, 100, 200];
 // 9. Weekend Warrior (Sat/Sun logs)
 const WEEKEND_MILESTONES = [10, 50, 100, 250, 500];
+// 10. Disciple (Chapters Read)
+const DISCIPLE_MILESTONES = [10, 50, 100, 260, 500];
+// 11. Prayer Warrior (Prayer Cards Created)
+const PRAYER_MILESTONES = [5, 20, 50, 100];
+
 
 export function calculateBadges(stats: {
     streak: number;
@@ -57,6 +62,8 @@ export function calculateBadges(stats: {
     earlyBirdCount: number;
     nightOwlCount: number;
     weekendCount: number;
+    totalChaptersRead: number;
+    totalPrayerCards: number;
 }) {
     const badges: BadgeDef[] = [];
 
@@ -94,6 +101,10 @@ export function calculateBadges(stats: {
     createFamily('early', 'Early Bird', (v) => `${v} Morning Workouts`, Sun, EARLY_MILESTONES, stats.earlyBirdCount);
     createFamily('night', 'Night Owl', (v) => `${v} Late Night Workouts`, Moon, NIGHT_MILESTONES, stats.nightOwlCount);
     createFamily('weekend', 'Weekend Warrior', (v) => `${v} Weekend Activities`, Calendar, WEEKEND_MILESTONES, stats.weekendCount);
+
+    // New Spiritual Badges
+    createFamily('disciple', 'The Word', (v) => `${v} Chapters Read`, BookOpen, DISCIPLE_MILESTONES, stats.totalChaptersRead);
+    createFamily('prayer', 'Prayer Warrior', (v) => `${v} Prayers Created`, Heart, PRAYER_MILESTONES, stats.totalPrayerCards);
 
     // Sort: Earned first, then by progress %
     return badges.sort((a, b) => {

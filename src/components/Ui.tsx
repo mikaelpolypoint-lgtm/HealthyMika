@@ -8,9 +8,9 @@ export function Card({ children, className }: { children: React.ReactNode; class
     );
 }
 
-export function CardTitle({ children }: { children: React.ReactNode }) {
+export function CardTitle({ children, className }: { children: React.ReactNode; className?: string }) {
     return (
-        <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+        <h3 className={twMerge("text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2", className)}>
             {children}
         </h3>
     );

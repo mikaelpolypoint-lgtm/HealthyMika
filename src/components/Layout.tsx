@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings, Footprints } from 'lucide-react';
+import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings, Footprints, Trophy, Heart } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { signOut } from 'firebase/auth';
@@ -8,6 +8,8 @@ import { useState } from 'react';
 
 const navItems = [
     { icon: LayoutDashboard, label: 'Overview', path: '/' },
+    { icon: Heart, label: 'Fellowship', path: '/fellowship' },
+    { icon: Trophy, label: 'Goals', path: '/goals' },
     { icon: Scale, label: 'Weight', path: '/weight' },
     { icon: Bike, label: 'Cycling', path: '/biking' },
     { icon: Footprints, label: 'Running', path: '/running' },
@@ -27,7 +29,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="flex min-h-screen bg-brand-background font-sans text-slate-900">
             {/* Mobile Header */}
             <header className="md:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-50 flex items-center justify-between px-4">
-                <h1 className="text-xl font-bold text-brand-primary">MikaFit</h1>
+                <h1 className="text-xl font-bold text-brand-primary">MiKI Life</h1>
                 <button onClick={toggleMenu} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg">
                     {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
                 </button>
@@ -48,7 +50,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             )}>
                 <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                     <h1 className="text-2xl font-bold text-brand-primary">
-                        MikaFit
+                        MiKI Life
                     </h1>
                     <button onClick={closeMenu} className="md:hidden text-slate-400 hover:text-slate-600">
                         <X size={20} />

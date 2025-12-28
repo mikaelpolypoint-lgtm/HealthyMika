@@ -57,6 +57,9 @@ export default function Goals() {
     const [newItem, setNewItem] = useState('');
     const [loadingItem, setLoadingItem] = useState(false);
 
+    const [weeklyStrength, setWeeklyStrength] = useState(0);
+    const [consistentStrengthWeeks, setConsistentStrengthWeeks] = useState(0);
+
     const todayStr = format(new Date(), 'yyyy-MM-dd');
 
     // Load Data
@@ -143,6 +146,43 @@ export default function Goals() {
         });
 
         return () => { unsubDaily(); unsubFood(); unsubItems(); unsubMeta(); unsubCardio(); unsubWeight(); };
+    }, []);
+
+    // Calculate Strength Consistency (Separate Effect)
+    useEffect(() => {
+        const q = query(collection(db, 'training_plan'));
+        const unsub = onSnapshot(q, (snap) => {
+            const completedByWeek: Record<string, number> = {};
+            let thisWeekCount = 0;
+
+            const now = new Date();
+            const currentWeek = getWeek(now, { weekStartsOn: 0 }); // Use date-fns getWeek
+            const currentYear = now.getFullYear();
+
+            snap.docs.forEach(d => {
+                const data = d.data();
+                if (data.completed) {
+                    // Group by Year-Week key to be safe across years
+                    const key = `${data.week}`; // Plan uses explicit 'week' number (1-52)
+                    completedByWeek[key] = (completedByWeek[key] || 0) + 1;
+
+                    // Check if this specific plan item matches "current week"
+                    if (data.date) {
+                        const date = data.date.toDate();
+                        if (getWeek(date, { weekStartsOn: 0 }) === currentWeek && date.getFullYear() === currentYear) {
+                            thisWeekCount++;
+                        }
+                    }
+                }
+            });
+
+            // Count consistent weeks (>= 2 workouts)
+            const goodWeeks = Object.values(completedByWeek).filter(count => count >= 2).length;
+
+            setConsistentStrengthWeeks(goodWeeks);
+            setWeeklyStrength(thisWeekCount);
+        });
+        return () => unsub();
     }, []);
 
     const [recentFoodLogs, setRecentFoodLogs] = useState<Record<string, any>>({});
@@ -658,6 +698,38 @@ export default function Goals() {
                                 </ul>
                             </div>
                         )}
+                    </div>
+                </Card>
+
+                {/* 7. Strength Training Goal (New) */}
+                <Card className="relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-rose-50 rounded-bl-full -mr-8 -mt-8 z-0" />
+                    <div className="relative z-10">
+                        <CardTitle>Strength Training 💪</CardTitle>
+                        <p className="text-sm text-slate-500 mb-4">Target: 2 workouts/week (Consistency)</p>
+
+                        {/* Weekly Breakdown */}
+                        <div className="mb-4 bg-white/50 backdrop-blur-sm rounded-lg p-2 border border-slate-100">
+                            <div className="flex justify-between text-xs font-bold text-slate-500 uppercase mb-1">
+                                <span>This Week</span>
+                                <span>Target: 2 Workouts</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-full bg-slate-200 rounded-full h-2">
+                                    <div className={clsx("h-2 rounded-full transition-all", getProgressColor(weeklyStrength, 2))} style={{ width: `${Math.min(100, (weeklyStrength / 2) * 100)}%` }} />
+                                </div>
+                                <span className="text-xs font-bold w-12 text-right">{weeklyStrength}/2</span>
+                            </div>
+                        </div>
+
+                        <div className="flex items-end gap-2 mb-2">
+                            <span className="text-3xl font-bold text-rose-600">{consistentStrengthWeeks}</span>
+                            <span className="text-slate-400 mb-1 font-bold text-sm">/ 52 Weeks (Year)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-2">
+                            <div className="bg-rose-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${Math.min(100, (consistentStrengthWeeks / 52) * 100)}%` }} />
+                        </div>
+                        <p className="text-xs text-right text-slate-400 mt-2 font-medium">Weeks with ≥ 2 workouts</p>
                     </div>
                 </Card>
             </div>

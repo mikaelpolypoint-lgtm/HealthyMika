@@ -15,6 +15,22 @@ interface Workout {
     date: Timestamp;
 }
 
+interface PlannedWorkout {
+    id: string;
+    order: number;
+    week: number;
+    day: number;
+    completed: boolean;
+    date?: Timestamp; // Completed date
+    exercises: {
+        id: string;
+        name: string;
+        sets: number;
+        reps: number;
+        weight: number;
+    }[];
+}
+
 export default function Training() {
     const [workouts, setWorkouts] = useState<Workout[]>([]);
     const [exercise, setExercise] = useState('');
@@ -22,85 +38,210 @@ export default function Training() {
     const [reps, setReps] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // Finnlo Autark 1500 Exercises
+    // Finnlo Autark 1500 Exercises (Selected)
     const EXERCISE_CATALOG = [
         {
-            id: 'chest-press',
-            name: 'Bench Press',
+            id: 'bench-press',
+            name: 'Vertical Fixed Bench Press',
             muscle: 'Chest',
-            desc: 'Sit with back flat against pad. Push handles forward until arms are extended, then return slowly.',
+            desc: 'Elbows bent at chest level, push forward not locking out.',
             color: 'bg-red-100 text-red-600'
         },
         {
-            id: 'butterfly',
-            name: 'Butterfly',
-            muscle: 'Chest',
-            desc: 'Place forearms on pads. Push arms together in front of chest, squeezing pectorals.',
-            color: 'bg-red-50 text-red-500'
-        },
-        {
-            id: 'lat-pull',
-            name: 'Lat Pulldown',
-            muscle: 'Back',
-            desc: 'Grip bar wide. Pull down to upper chest, squeezing shoulder blades together.',
-            color: 'bg-blue-100 text-blue-600'
-        },
-        {
-            id: 'rowing',
-            name: 'Seated Row',
-            muscle: 'Back',
-            desc: 'Sit facing machine. Pull handles to waist while keeping back straight.',
-            color: 'bg-blue-50 text-blue-500'
-        },
-        {
-            id: 'shoulder-press',
-            name: 'Shoulder Raise',
-            muscle: 'Shoulders',
-            desc: 'Using lower pulley, raise arm to side or front to shoulder height.',
-            color: 'bg-orange-100 text-orange-600'
-        },
-        {
-            id: 'tricep-push',
-            name: 'Triceps Pushdown',
-            muscle: 'Triceps',
-            desc: 'Grip rope/bar at chest level. Push down until arms are fully extended.',
+            id: 'bicep-curl-stand',
+            name: 'Standing Biceps Curls',
+            muscle: 'Arms',
+            desc: 'Stable stance, bend arms upwards keeping elbows fixed.',
             color: 'bg-purple-100 text-purple-600'
         },
         {
-            id: 'bicep-curl',
-            name: 'Bicep Curl',
-            muscle: 'Biceps',
-            desc: 'Stand facing machine. Curl bar upwards towards chin, keeping elbows tucked.',
-            color: 'bg-purple-50 text-purple-500'
+            id: 'lat-pull',
+            name: 'Lat Pull Down',
+            muscle: 'Back',
+            desc: 'Pull bar slowly down to chest level.',
+            color: 'bg-blue-100 text-blue-600'
+        },
+        {
+            id: 'crunch',
+            name: 'Abdominal Crunch',
+            muscle: 'Abs',
+            desc: 'Rope at neck, crunch upper body downwards.',
+            color: 'bg-yellow-100 text-yellow-600'
         },
         {
             id: 'leg-ext',
             name: 'Leg Extension',
             muscle: 'Legs',
-            desc: 'Place ankles behind lower pads. Extend legs until straight.',
+            desc: 'Stretch legs upwards from knee joints.',
             color: 'bg-emerald-100 text-emerald-600'
-        },
-        {
-            id: 'leg-curl',
-            name: 'Leg Curl',
-            muscle: 'Legs',
-            desc: 'Stand facing machine. Curl one leg back and up towards glutes.',
-            color: 'bg-emerald-50 text-emerald-500'
-        },
-        {
-            id: 'crunch',
-            name: 'Ab Crunch',
-            muscle: 'Abs',
-            desc: 'Kneel facing machine holding rope behind neck. Crunch torso downwards.',
-            color: 'bg-yellow-100 text-yellow-600'
         }
     ];
 
     const selectExercise = (ex: typeof EXERCISE_CATALOG[0]) => {
         setExercise(ex.name);
-        // Optional: Pre-fill weight from PR or last history?
-        // Let's just set focus or smooth scroll to form if needed
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Scroll to manual form if open, else maybe open it
+        const form = document.getElementById('manual-log-form');
+        if (form) form.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    // --- Program Logic ---
+    const [plan, setPlan] = useState<PlannedWorkout[]>([]);
+    const [nextWorkout, setNextWorkout] = useState<PlannedWorkout | null>(null);
+    const [generating, setGenerating] = useState(false);
+
+    // Fetch Plan
+    useEffect(() => {
+        const q = query(collection(db, 'training_plan'), orderBy('order', 'asc'));
+        const unsub = onSnapshot(q, (snap) => {
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as PlannedWorkout[];
+            setPlan(data);
+            const next = data.find(w => !w.completed);
+            setNextWorkout(next || null);
+        });
+        return () => unsub();
+    }, []);
+
+    const generateYearlyPlan = async () => {
+        if (!confirm('Generate a new yearly plan? This will create 156 planned workouts.')) return;
+        setGenerating(true);
+        try {
+            const batchPromises = [];
+
+            // Starting Config
+            const config = {
+                'bench-press': { weight: 35, sets: 2 },
+                'bicep-curl-stand': { weight: 15, sets: 1 },
+                'lat-pull': { weight: 25, sets: 2 },
+                'crunch': { weight: 20, sets: 1 },
+                'leg-ext': { weight: 40, sets: 1 }
+            };
+
+            const weeks = 52;
+            const daysPerWeek = 3;
+            let orderCounter = 1;
+
+            // Progression: 4 week cycle. 
+            // W1: 2x8-10, W2: 2x10-12, W3: 2x12-14, W4: 2x14-15 (Fail? Ok).
+            // W5: +5kg, Reset to 2x8.
+
+            // Simpler Linear: Increase reps target every week (3 sessions).
+            // Cycle: 8, 10, 12, 14 reps. Then Weight pump.
+
+
+            let weekOfCycle = 1; // 1-4
+
+            for (let w = 1; w <= weeks; w++) {
+
+                // Determine Reps & Weights for this week
+                let repTarget = 8;
+                if (weekOfCycle === 1) repTarget = 8;
+                if (weekOfCycle === 2) repTarget = 10;
+                if (weekOfCycle === 3) repTarget = 12;
+                if (weekOfCycle === 4) repTarget = 14;
+
+                for (let d = 1; d <= daysPerWeek; d++) {
+                    const workoutExercises = EXERCISE_CATALOG.map(ex => {
+                        const conf = config[ex.id as keyof typeof config];
+                        return {
+                            id: ex.id,
+                            name: ex.name,
+                            sets: conf.sets,
+                            reps: repTarget,
+                            weight: conf.weight
+                        };
+                    });
+
+                    // Add doc
+                    // Note: Use addDoc or setDoc with explicit ID. 
+                    // Let's use setDoc with an ordered ID to make sorting easy/reliable if needed, or just let Firestore handle it and sort by 'order'.
+                    // We'll create promises.
+                    batchPromises.push(
+                        addDoc(collection(db, 'training_plan'), {
+                            order: orderCounter,
+                            week: w,
+                            day: d,
+                            completed: false,
+                            exercises: workoutExercises
+                        })
+                    );
+                    orderCounter++;
+                }
+
+                // Progression for next week
+                weekOfCycle++;
+                if (weekOfCycle > 4) {
+                    weekOfCycle = 1;
+                    // Increase Weights
+                    (Object.keys(config) as Array<keyof typeof config>).forEach(key => {
+                        if (config[key].weight < 80) {
+                            config[key].weight += 5;
+                        }
+                    });
+                }
+            }
+
+            await Promise.all(batchPromises); // Might hit limits if 150 items. Firestore handles parallel requests well usually.
+            // If it fails, we might need chunks. 156 requests is okay-ish.
+        } catch (e) {
+            console.error(e);
+            alert('Error generating plan');
+        } finally {
+            setGenerating(false);
+        }
+    };
+
+    // Execution State
+    const [executing, setExecuting] = useState(false);
+    const [executionData, setExecutionData] = useState<any[]>([]); // Copy of nextWorkout.exercises but mutable
+
+    const startExecution = () => {
+        if (!nextWorkout) return;
+        setExecutionData(nextWorkout.exercises.map(e => ({ ...e, actualWeight: e.weight, actualReps: e.reps })));
+        setExecuting(true);
+    };
+
+    const finishWorkout = async () => {
+        if (!nextWorkout) return;
+        setLoading(true);
+        try {
+            // 1. Log all exercises to 'workouts' collection
+            const logPromises = executionData.map(e => {
+                // We need to log X sets. The user input 'actualReps'/'actualWeight' applies to ALL sets for simplicity?
+                // Or we iterate sets.
+                // Request said "5-7 sets overall". 
+                // e.sets is 1 or 2.
+                const logs = [];
+                for (let i = 0; i < e.sets; i++) {
+                    logs.push(addDoc(collection(db, 'workouts'), {
+                        exercise: e.name,
+                        weight: Number(e.actualWeight),
+                        reps: Number(e.actualReps),
+                        date: Timestamp.now()
+                    }));
+                }
+                return Promise.all(logs);
+            });
+            await Promise.all(logPromises);
+
+            // 2. Mark plan as completed
+            await updateDoc(doc(db, 'training_plan', nextWorkout.id), {
+                completed: true,
+                date: Timestamp.now()
+            });
+
+            setExecuting(false);
+            setNextWorkout(null); // Will update via snapshot
+
+            // Check for PRs (Simple check against session max)
+            // ... (PR Logic existing handles PRs based on 'workouts' update which triggers snapshot... actually PR logic is local state 'prs' memoized on 'workouts'.
+            // To show the banner immediately, we might need to manually check, but the 'workouts' snapshot will update and 'prs' will update.)
+
+        } catch (e) {
+            console.error(e);
+            alert('Failed to save workout');
+        } finally {
+            setLoading(false);
+        }
     };
 
 
@@ -220,9 +361,127 @@ export default function Training() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="flex flex-col gap-8">
-                    <Card className="h-fit order-2 lg:order-1">
-                        <CardTitle>Log Set</CardTitle>
-                        <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* Next Workout Card */}
+                    <Card className="h-fit order-1 lg:order-1 border-l-4 border-l-rose-500">
+                        <CardTitle className="flex justify-between items-center">
+                            <span>Next Workout</span>
+                            {plan.length === 0 && (
+                                <button
+                                    onClick={generateYearlyPlan}
+                                    disabled={generating}
+                                    className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-full text-slate-600 transition"
+                                >
+                                    {generating ? 'Generating...' : 'Create Yearly Plan'}
+                                </button>
+                            )}
+                        </CardTitle>
+
+                        {!nextWorkout && plan.length > 0 && (
+                            <div className="py-8 text-center text-slate-500">
+                                <p>All planned workouts completed! You are a beast! 🦁</p>
+                            </div>
+                        )}
+
+                        {nextWorkout && !executing && (
+                            <div className="mt-4">
+                                <div className="flex justify-between items-baseline mb-4">
+                                    <h4 className="text-xl font-bold text-slate-800">Week {nextWorkout.week} <span className="text-sm font-normal text-slate-400">/ Day {nextWorkout.day}</span></h4>
+                                    <span className="text-xs font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded">
+                                        {nextWorkout.exercises.reduce((a, b) => a + b.sets, 0)} Sets Total
+                                    </span>
+                                </div>
+
+                                <div className="space-y-3 mb-6">
+                                    {nextWorkout.exercises.map((ex, idx) => (
+                                        <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                                            <div>
+                                                <p className="font-bold text-slate-700">{ex.name}</p>
+                                                <p className="text-xs text-slate-400">{ex.sets} set{ex.sets > 1 ? 's' : ''}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <span className="font-bold text-slate-800">{ex.weight}kg</span>
+                                                <span className="text-xs text-slate-400 mx-2">x</span>
+                                                <span className="font-bold text-slate-800">{ex.reps}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <button
+                                    onClick={startExecution}
+                                    className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-rose-900/20 transition-all flex justify-center items-center gap-2"
+                                >
+                                    <Dumbbell size={20} />
+                                    Start Workout
+                                </button>
+                            </div>
+                        )}
+
+                        {executing && (
+                            <div className="mt-4 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                                <p className="text-sm text-slate-500">Confirm your lifts. Adjust if you changed weight/reps.</p>
+
+                                <div className="space-y-4">
+                                    {executionData.map((ex, idx) => (
+                                        <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                            <div className="flex justify-between mb-2">
+                                                <span className="font-bold text-slate-700">{ex.name}</span>
+                                                <span className="text-xs text-slate-400 font-bold uppercase">{ex.sets} Set{ex.sets > 1 ? 's' : ''}</span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="flex flex-col">
+                                                    <label className="text-[10px] text-slate-400 uppercase font-bold mb-1">Weight (kg)</label>
+                                                    <input
+                                                        type="number"
+                                                        value={ex.actualWeight}
+                                                        onChange={(e) => {
+                                                            const newData = [...executionData];
+                                                            newData[idx].actualWeight = e.target.value;
+                                                            setExecutionData(newData);
+                                                        }}
+                                                        className="w-full p-2 rounded border border-slate-200 text-sm font-bold"
+                                                    />
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <label className="text-[10px] text-slate-400 uppercase font-bold mb-1">Reps</label>
+                                                    <input
+                                                        type="number"
+                                                        value={ex.actualReps}
+                                                        onChange={(e) => {
+                                                            const newData = [...executionData];
+                                                            newData[idx].actualReps = e.target.value;
+                                                            setExecutionData(newData);
+                                                        }}
+                                                        className="w-full p-2 rounded border border-slate-200 text-sm font-bold"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        onClick={() => setExecuting(false)}
+                                        className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-xl transition"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={finishWorkout}
+                                        disabled={loading}
+                                        className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-lg shadow-emerald-900/20 transition flex justify-center gap-2"
+                                    >
+                                        {loading ? 'Saving...' : 'Finish & Log'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </Card>
+
+                    <Card className="h-fit order-2 lg:order-2">
+                        <CardTitle>Manual Log</CardTitle>
+                        <form id="manual-log-form" onSubmit={handleSubmit} className="space-y-4 mt-4">
                             <div className="relative">
                                 <Dumbbell className="absolute left-3 top-3 text-slate-400" size={18} />
                                 <input
@@ -254,10 +513,10 @@ export default function Training() {
                             <button
                                 type="submit"
                                 disabled={loading}
-                                className="w-full flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 px-4 rounded-xl transition shadow-lg shadow-rose-900/10 disabled:opacity-50"
+                                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-4 rounded-xl transition shadow-lg disabled:opacity-50"
                             >
                                 <Save size={18} />
-                                {loading ? 'Saving...' : 'Save Set'}
+                                {loading ? 'Saving...' : 'Log Single Set'}
                             </button>
                         </form>
                     </Card>

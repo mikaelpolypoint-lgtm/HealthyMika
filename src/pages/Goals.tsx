@@ -3,7 +3,7 @@ import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import { collection, query, onSnapshot, doc, setDoc, Timestamp, addDoc, deleteDoc, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
-import { format, getWeek } from 'date-fns';
+import { getWeek } from 'date-fns';
 import { Trash2, Smartphone, Wine, UtensilsCrossed, Cross } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -64,7 +64,7 @@ export default function Goals() {
     const [weeklyStrength, setWeeklyStrength] = useState(0);
     const [consistentStrengthWeeks, setConsistentStrengthWeeks] = useState(0);
 
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
+
 
     // Load Data
     useEffect(() => {

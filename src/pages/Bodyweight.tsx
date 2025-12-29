@@ -3,10 +3,10 @@ import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Activity, CheckCircle2, Pencil, Trash2, Trophy, Flame, CalendarDays, TrendingUp } from 'lucide-react';
+import { Activity, Pencil, Trash2, Trophy, Flame, CalendarDays, TrendingUp } from 'lucide-react';
 import { clsx } from 'clsx';
-import { format, isSameDay, subDays, startOfMonth, isAfter, getDay, startOfWeek, endOfWeek, eachDayOfInterval, subMonths } from 'date-fns';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area } from 'recharts';
+import { format, isSameDay, subDays, startOfMonth, isAfter } from 'date-fns';
+import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area } from 'recharts';
 
 interface BodyweightLog {
     id: string;

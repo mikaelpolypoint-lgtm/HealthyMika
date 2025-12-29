@@ -4,7 +4,7 @@ import { Card, CardTitle } from "../components/Ui";
 import { collection, query, onSnapshot, doc, setDoc, Timestamp, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { format } from 'date-fns';
-import { Cross, Smartphone, UtensilsCrossed, Wine, Droplets, Calendar as CalendarIcon, Save, Loader2, Moon, CloudSun, Target, Bed, Activity, Pill, Droplet, Heart, Smile, BookOpen, Brain, Zap, Clock, Trash2, ListChecks, Plus, Sparkles, Scale, Search, ChevronDown, CheckCircle2, ChevronLeft, ChevronRight, MessageSquare, AlertCircle } from 'lucide-react';
+import { Cross, Smartphone, UtensilsCrossed, Wine, Droplets, Bed, Activity, Pill, Droplet, Smile, BookOpen, Trash2, ListChecks, Plus, Sparkles, ChevronDown, CheckCircle2, ChevronLeft, ChevronRight, MessageSquare, AlertCircle, Save } from 'lucide-react';
 import { clsx } from 'clsx';
 
 // --- Static Data: New Testament Books (for Bible Log) ---
@@ -263,6 +263,8 @@ export default function DailyLog() {
         await setDoc(doc(db, 'day_food_logs', selectedDate), newData, { merge: true });
         if (updates.eatWhenHungry !== undefined) updateGoal({ hungryOnly: updates.eatWhenHungry });
     };
+
+    const toggleSodas = (val: boolean) => updateFood({ noSodas: val });
 
     const updateFellowship = async (updates: Partial<FellowshipLog>) => {
         const newData = { ...fellowshipLog, ...updates };

@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
-import { collection, query, onSnapshot, doc, setDoc, Timestamp, addDoc, deleteDoc, orderBy, updateDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, Timestamp, addDoc, deleteDoc, orderBy, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { BookOpen, Star, Trash2, Edit2, Check, X, Plus } from 'lucide-react';
-import { clsx } from 'clsx';
+import { Star, Trash2, Edit2, Check, X, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface Book {
@@ -85,7 +84,6 @@ export default function Learning() {
     };
 
     // Derived Stats
-    const booksRead2026 = books.filter(b => b.progress === 100 && b.finishedAt?.toDate().getFullYear() === 2026).length; // Adjust logic if needed for fiscal year
     // Simple filter for "Finished" generally for now or use the flag
     const finishedBooks = books.filter(b => b.progress === 100);
     const currentBooks = books.filter(b => b.progress < 100);

@@ -12,8 +12,11 @@ import Strength from './pages/Strength';
 import Food from './pages/Food';
 import SettingsP from './pages/Settings';
 import Bodyweight from './pages/Bodyweight';
+import DailyLog from './pages/DailyLog';
 import Goals from './pages/Goals';
 import Fellowship from './pages/Fellowship';
+import Learning from './pages/Learning';
+
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<any>(null);
@@ -37,8 +40,10 @@ export default function App() {
         <Router>
             <Routes>
                 <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                <Route path="/daily-log" element={<ProtectedRoute><DailyLog /></ProtectedRoute>} />
                 <Route path="/weight" element={<ProtectedRoute><Weight /></ProtectedRoute>} />
                 <Route path="/goals" element={<ProtectedRoute><Goals /></ProtectedRoute>} />
+                <Route path="/learning" element={<ProtectedRoute><Learning /></ProtectedRoute>} />
                 <Route path="/fellowship" element={<ProtectedRoute><Fellowship /></ProtectedRoute>} />
                 <Route path="/biking" element={<ProtectedRoute><Biking /></ProtectedRoute>} />
                 <Route path="/running" element={<ProtectedRoute><Running /></ProtectedRoute>} />

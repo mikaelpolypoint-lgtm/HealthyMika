@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings, Footprints, Trophy, Heart, BookOpen, PenTool } from 'lucide-react';
+import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings, Footprints, BookOpen, PenTool, Trophy, Heart, GraduationCap, Leaf, ListChecks } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { signOut } from 'firebase/auth';
@@ -7,17 +7,23 @@ import { auth } from '../firebase';
 import { useState } from 'react';
 
 const navItems = [
-    { icon: LayoutDashboard, label: 'Overview', path: '/' },
-    { icon: PenTool, label: 'Daily Log', path: '/daily-log' },
-    { icon: BookOpen, label: 'Learning', path: '/learning' },
-    { icon: Heart, label: 'Fellowship', path: '/fellowship' },
-    { icon: Trophy, label: 'Goals', path: '/goals' },
-    { icon: Scale, label: 'Weight', path: '/weight' },
-    { icon: Bike, label: 'Cycling', path: '/biking' },
-    { icon: Footprints, label: 'Running', path: '/running' },
-    { icon: Dumbbell, label: 'Strength', path: '/strength' },
-    { icon: Activity, label: 'Bodyweight', path: '/bodyweight' },
-    { icon: Apple, label: 'Food', path: '/food' },
+    { icon: PenTool, label: 'Daily', path: '/' },
+    { icon: LayoutDashboard, label: 'Goals', path: '/dashboard' },
+    { icon: GraduationCap, label: 'Life', path: '/life' },
+    { icon: BookOpen, label: 'Books', path: '/books', indent: true },
+    { icon: ListChecks, label: 'Tasks', path: '/tasks', indent: true },
+    { icon: Leaf, label: 'Less is More', path: '/less-is-more', indent: true },
+    { icon: Heart, label: 'Health', path: '/health' },
+    { icon: Scale, label: 'Weight', path: '/weight', indent: true },
+    { icon: Apple, label: 'Food', path: '/food', indent: true },
+    { icon: Trophy, label: 'Sport', path: '/sport' },
+    { icon: Bike, label: 'Cycling', path: '/biking', indent: true },
+    { icon: Footprints, label: 'Running', path: '/running', indent: true },
+    { icon: Dumbbell, label: 'Strength', path: '/strength', indent: true },
+    { icon: Activity, label: 'Bodyweight', path: '/bodyweight', indent: true },
+    // Divider
+    { type: 'divider' },
+    { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -60,24 +66,35 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 </div>
 
                 <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-                    {navItems.map((item) => {
-                        const isActive = location.pathname === item.path;
-                        const Icon = item.icon;
+                    {navItems.map((item, i) => {
+                        if (item.type === 'divider') {
+                            return <div key={`divider-${i}`} className="my-2 h-px bg-slate-100" />
+                        }
+
+                        // Cast to ensure type safety for regular items
+                        const navLink = item as { icon: typeof LayoutDashboard, label: string, path: string, indent?: boolean };
+                        const isActive = location.pathname === navLink.path;
+                        const Icon = navLink.icon;
+                        const isChild = navLink.indent;
 
                         return (
                             <Link
-                                key={item.path}
-                                to={item.path}
+                                key={navLink.path}
+                                to={navLink.path}
                                 onClick={closeMenu}
                                 className={twMerge(
-                                    "flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group font-medium",
+                                    "flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group font-medium relative",
                                     isActive
-                                        ? "bg-brand-primary/5 text-brand-primary border-r-2 border-brand-primary"
-                                        : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                                        ? "bg-brand-primary/5 text-brand-primary"
+                                        : "text-slate-500 hover:bg-slate-50 hover:text-slate-900",
+                                    isChild && "pl-8 text-sm py-2.5"
                                 )}
                             >
-                                <Icon size={20} className={clsx("transition-transform group-hover:scale-105", isActive && "text-brand-primary")} />
-                                <span>{item.label}</span>
+                                {isActive && !isChild && <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-primary rounded-r-full" />}
+                                {isActive && isChild && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-brand-primary rounded-r-full" />}
+
+                                <Icon size={isChild ? 18 : 20} className={clsx("transition-transform group-hover:scale-105", isActive && "text-brand-primary")} />
+                                <span>{navLink.label}</span>
                             </Link>
                         );
                     })}
@@ -94,9 +111,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
                             </div>
                         </div>
                         <div className="flex items-center">
-                            <Link to="/settings" className="text-slate-400 hover:text-brand-primary transition-colors p-2" title="Settings">
-                                <Settings size={18} />
-                            </Link>
                             <button onClick={() => signOut(auth)} className="text-slate-400 hover:text-red-500 transition-colors p-2" title="Sign Out">
                                 <LogOut size={18} />
                             </button>

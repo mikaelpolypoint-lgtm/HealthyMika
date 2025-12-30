@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, deleteDoc, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Scale, Trash2, Pencil, X, Check } from 'lucide-react';
 import { format } from 'date-fns';
@@ -17,22 +17,28 @@ export default function Weight() {
     const [logs, setLogs] = useState<WeightLog[]>([]);
     const [currentWeight, setCurrentWeight] = useState('');
     const [loading, setLoading] = useState(false);
-    const [goalWeight, setGoalWeight] = useState(85); // Default
+
+    // Dynamic Goal State
+    const [goalWeight, setGoalWeight] = useState(85);
+    const [goalEndDate, setGoalEndDate] = useState('');
 
     // Editing state
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editWeight, setEditWeight] = useState('');
-    const [editDate, setEditDate] = useState(''); // New state for editing date
+    const [editDate, setEditDate] = useState('');
 
     useEffect(() => {
-        // Fetch Settings
-        getDoc(doc(db, 'settings', 'global')).then(snap => {
-            if (snap.exists() && snap.data().targetWeight) {
-                setGoalWeight(snap.data().targetWeight);
+        // Fetch Dynamic Goal
+        const unsubGoals = onSnapshot(collection(db, 'goals'), (snap) => {
+            const goals = snap.docs.map(d => d.data());
+            const weightGoal = goals.find(g => g.slug === 'weight');
+            if (weightGoal) {
+                setGoalWeight(weightGoal.yearlyTarget);
+                setGoalEndDate(weightGoal.endDate);
             }
         });
 
-        const q = query(collection(db, 'weight_logs'), orderBy('date', 'desc')); // Order desc for list
+        const q = query(collection(db, 'weight_logs'), orderBy('date', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(doc => ({
                 id: doc.id,
@@ -40,7 +46,10 @@ export default function Weight() {
             })) as WeightLog[];
             setLogs(data);
         });
-        return () => unsubscribe();
+        return () => {
+            unsubGoals();
+            unsubscribe();
+        };
     }, []);
 
     const handleAddWeight = async (e: React.FormEvent) => {
@@ -116,15 +125,28 @@ export default function Weight() {
         }));
 
     const latestWeight = chartData.length > 0 ? chartData[chartData.length - 1].weight : 91;
-    const startWeight = 91;
-    // goalWeight is now from state
+    const startWeight = 94.0; // Hardcoded start for now, or find oldest log
     const progress = ((startWeight - latestWeight) / (startWeight - goalWeight)) * 100;
+
+    // Dynamic Calculations
+    const today = new Date();
+    const end = goalEndDate ? new Date(goalEndDate) : new Date();
+    // Weeks remaining
+    const diffTime = Math.abs(end.getTime() - today.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const weeksLeft = Math.max(1, diffDays / 7);
+
+    const amountToLose = Math.max(0, latestWeight - goalWeight);
+    const weeklyRateNeeded = amountToLose / weeksLeft;
 
     return (
         <Layout>
             <header>
                 <h2 className="text-3xl font-bold text-brand-primary mb-2">Weight Tracker</h2>
-                <p className="text-slate-500">Target: <span className="text-brand-accent font-bold">{goalWeight}kg</span></p>
+                <div className="flex gap-4 items-center text-slate-500">
+                    <p>Target: <span className="text-brand-accent font-bold">{goalWeight}kg</span></p>
+                    {goalEndDate && <p className="text-sm border-l pl-4 border-slate-300">Deadline: {format(new Date(goalEndDate), 'MMM d, yyyy')}</p>}
+                </div>
             </header>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -265,6 +287,15 @@ export default function Weight() {
                                 <span className="text-slate-200 text-sm">Remaining</span>
                                 <span className="text-xl font-bold text-amber-300">{(latestWeight - goalWeight).toFixed(1)} kg</span>
                             </div>
+
+                            <div className="p-3 bg-white/10 rounded-lg backdrop-blur-sm flex flex-col gap-1">
+                                <div className="flex justify-between items-end">
+                                    <span className="text-slate-200 text-sm">Required Rate</span>
+                                    <span className="text-lg font-bold text-white">{weeklyRateNeeded.toFixed(2)} <span className="text-xs font-normal opacity-70">kg/week</span></span>
+                                </div>
+                                <span className="text-xs text-slate-300 text-right">{weeksLeft.toFixed(0)} weeks remaining</span>
+                            </div>
+
                             <div className="w-full bg-white/20 rounded-full h-2.5 mt-2">
                                 <div className="bg-emerald-400 h-2.5 rounded-full" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}></div>
                             </div>

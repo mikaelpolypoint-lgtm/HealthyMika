@@ -138,6 +138,9 @@ export default function DailyLog() {
     const [selectedBook, setSelectedBook] = useState(NT_BOOKS[0]);
     const [isBookSelectorOpen, setIsBookSelectorOpen] = useState(false);
 
+    // History State
+    const [historyChapters, setHistoryChapters] = useState<Set<string>>(new Set());
+
 
     const [todaysWeight, setTodaysWeight] = useState<string>('');
 
@@ -188,12 +191,26 @@ export default function DailyLog() {
             }
         });
 
-        // 3. Fellowship Logs
+        // 3. Fellowship Logs (Current Day)
         const unsubFellowship = onSnapshot(doc(db, 'fellowship_logs', selectedDate), (doc) => {
             if (doc.exists()) {
                 const data = doc.data() as FellowshipLog;
                 setFellowshipLog(prev => ({ ...prev, ...data }));
             }
+        });
+
+        // 3b. Fellowship Logs (History - All other days)
+        // Note: For a larger app, we would query specific ranges or aggregate this.
+        const qHistory = query(collection(db, 'fellowship_logs'));
+        const unsubHistory = onSnapshot(qHistory, (snap) => {
+            const history = new Set<string>();
+            snap.docs.forEach(d => {
+                if (d.id !== selectedDate) { // Exclude current selected day from "history"
+                    const data = d.data() as FellowshipLog;
+                    data.chaptersRead?.forEach(ch => history.add(ch));
+                }
+            });
+            setHistoryChapters(history);
         });
 
         // 4. Daily Todos
@@ -213,7 +230,7 @@ export default function DailyLog() {
             setActiveBooks(allBooks.filter(b => b.progress < 100));
         });
 
-        return () => { unsubDaily(); unsubFood(); unsubFellowship(); unsubTodos(); unsubBooks(); };
+        return () => { unsubDaily(); unsubFood(); unsubFellowship(); unsubHistory(); unsubTodos(); unsubBooks(); };
     }, [selectedDate]);
 
 
@@ -275,6 +292,11 @@ export default function DailyLog() {
     const toggleChapter = (book: string, chapter: number) => {
         const chapterStr = `${book} ${chapter}`;
         const current = fellowshipLog.chaptersRead || [];
+        // If it's already in history, we generally don't toggle it off from history here, 
+        // we only toggle the CURRENT day's record.
+        // User logic: "Toggle" usually implies adding/removing from TODAY. 
+        // If I read it in the past, and click it today, do I mark it as read AGAIN today? (Re-read?) -> Yes, valid.
+
         let updated;
         if (current.includes(chapterStr)) {
             updated = current.filter(c => c !== chapterStr);
@@ -284,7 +306,8 @@ export default function DailyLog() {
         updateFellowship({ chaptersRead: updated });
     };
 
-    const isChapterRead = (book: string, chapter: number) => fellowshipLog.chaptersRead?.includes(`${book} ${chapter}`);
+    const isChapterReadToday = (book: string, chapter: number) => fellowshipLog.chaptersRead?.includes(`${book} ${chapter}`);
+    const isChapterReadHistory = (book: string, chapter: number) => historyChapters.has(`${book} ${chapter}`);
 
 
     const saveWeight = async () => {
@@ -308,8 +331,7 @@ export default function DailyLog() {
         await setDoc(doc(db, 'books', id), { progress: safeProgress }, { merge: true });
     };
 
-    // Auto-Sync Declutter to Goal Collection (Future)
-    const handleDeclutterBlur = async () => { };
+
 
     // Date Navigation
     const prevDay = () => setSelectedDate(format(new Date(new Date(selectedDate).setDate(new Date(selectedDate).getDate() - 1)), 'yyyy-MM-dd'));
@@ -598,14 +620,20 @@ export default function DailyLog() {
                         </div>
                         <div className="grid grid-cols-6 gap-1">
                             {Array.from({ length: selectedBook.chapters }, (_, i) => i + 1).map(chapter => {
-                                const read = isChapterRead(selectedBook.name, chapter);
+                                const readToday = isChapterReadToday(selectedBook.name, chapter);
+                                const readHistory = isChapterReadHistory(selectedBook.name, chapter);
                                 return (
                                     <button
                                         key={chapter}
                                         onClick={() => toggleChapter(selectedBook.name, chapter)}
                                         className={clsx("aspect-square rounded flex items-center justify-center text-[10px] font-bold transition-all",
-                                            read ? "bg-emerald-500 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-300 hover:border-emerald-300"
+                                            readToday
+                                                ? "bg-fuchsia-500 text-white shadow-sm"
+                                                : readHistory
+                                                    ? "bg-emerald-500 text-white shadow-sm opacity-80"
+                                                    : "bg-white border border-slate-200 text-slate-300 hover:border-fuchsia-300"
                                         )}
+                                        title={readToday ? "Read Today" : readHistory ? "Read in the past" : "Unread"}
                                     >
                                         {chapter}
                                     </button>
@@ -614,22 +642,12 @@ export default function DailyLog() {
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1">
                             {fellowshipLog.chaptersRead?.length > 0 && fellowshipLog.chaptersRead.map(ch => (
-                                <span key={ch} className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[9px] font-bold rounded border border-emerald-200">{ch}</span>
+                                <span key={ch} className="px-1.5 py-0.5 bg-fuchsia-100 text-fuchsia-800 text-[9px] font-bold rounded border border-fuchsia-200">{ch}</span>
                             ))}
                         </div>
                     </div>
 
-                    {/* Decluttering */}
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-                        <label className="text-xs font-bold text-slate-500 uppercase mb-2 block flex items-center gap-1"><Trash2 size={14} /> Daily Declutter</label>
-                        <input
-                            value={dailyGoal.declutteredItem || ''}
-                            onChange={(e) => updateGoal({ declutteredItem: e.target.value })}
-                            onBlur={handleDeclutterBlur}
-                            placeholder="Item removed today..."
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand-primary"
-                        />
-                    </div>
+
 
                     {/* Reading (Non-Bible) */}
                     <div>

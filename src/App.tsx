@@ -5,18 +5,21 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Sport from './pages/Sport';
 import Weight from './pages/Weight';
 import Biking from './pages/Biking';
 import Running from './pages/Running';
 import Strength from './pages/Strength';
+import Books from './pages/Books';
 import Food from './pages/Food';
-import SettingsP from './pages/Settings';
+import Health from './pages/Health';
+import Life from './pages/Life';
+import Settings from './pages/Settings';
 import Bodyweight from './pages/Bodyweight';
 import DailyLog from './pages/DailyLog';
-import Goals from './pages/Goals';
-import Fellowship from './pages/Fellowship';
-import Learning from './pages/Learning';
 
+import LessIsMore from './pages/LessIsMore';
+import Tasks from './pages/Tasks';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<any>(null);
@@ -30,8 +33,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         return () => unsubscribe();
     }, []);
 
-    if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400">Loading...</div>;
-    if (!user) return <Login />;
+    if (loading) return <div className="h-screen flex items-center justify-center text-brand-primary">Loading...</div>;
+    if (!user) return <div className="h-screen flex items-center justify-center"><Login /></div>;
     return <>{children}</>;
 }
 
@@ -39,18 +42,21 @@ export default function App() {
     return (
         <Router>
             <Routes>
-                <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-                <Route path="/daily-log" element={<ProtectedRoute><DailyLog /></ProtectedRoute>} />
+                <Route path="/" element={<ProtectedRoute><DailyLog /></ProtectedRoute>} />
+                <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                <Route path="/sport" element={<ProtectedRoute><Sport /></ProtectedRoute>} />
+                <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
+                <Route path="/life" element={<ProtectedRoute><Life /></ProtectedRoute>} />
                 <Route path="/weight" element={<ProtectedRoute><Weight /></ProtectedRoute>} />
-                <Route path="/goals" element={<ProtectedRoute><Goals /></ProtectedRoute>} />
-                <Route path="/learning" element={<ProtectedRoute><Learning /></ProtectedRoute>} />
-                <Route path="/fellowship" element={<ProtectedRoute><Fellowship /></ProtectedRoute>} />
+                <Route path="/books" element={<ProtectedRoute><Books /></ProtectedRoute>} />
+                <Route path="/less-is-more" element={<ProtectedRoute><LessIsMore /></ProtectedRoute>} />
+                <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
                 <Route path="/biking" element={<ProtectedRoute><Biking /></ProtectedRoute>} />
                 <Route path="/running" element={<ProtectedRoute><Running /></ProtectedRoute>} />
                 <Route path="/strength" element={<ProtectedRoute><Strength /></ProtectedRoute>} />
                 <Route path="/bodyweight" element={<ProtectedRoute><Bodyweight /></ProtectedRoute>} />
                 <Route path="/food" element={<ProtectedRoute><Food /></ProtectedRoute>} />
-                <Route path="/settings" element={<ProtectedRoute><SettingsP /></ProtectedRoute>} />
+                <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             </Routes>
         </Router>
     );

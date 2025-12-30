@@ -1,592 +1,559 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Layout } from "../components/Layout";
-import { Card, CardTitle } from "../components/Ui";
-import {
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie
-} from 'recharts';
-import { Activity, Bike, Dumbbell, Apple, Scale, Crown, Heart, BookOpen, Calendar } from "lucide-react";
-import { collection, query, orderBy, onSnapshot, Timestamp, doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
-import { isSameDay, isSameWeek, isSameMonth, format, subDays, getHours, isWeekend, isSunday, startOfWeek, endOfWeek } from 'date-fns';
-import { clsx } from 'clsx';
-import { calculateBadges } from '../utils/gamification';
-import type { BadgeDef } from '../utils/gamification';
+import { Card } from "../components/Ui";
 
-// Types
-type Tab = 'Daily' | 'Weekly' | 'Monthly' | 'Overall';
+import {
+    Bike, Dumbbell, Scale,
+    Crown, UtensilsCrossed, Wine, Smartphone, Footprints, Trash2, BookOpen
+} from "lucide-react";
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+import { clsx } from 'clsx';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
+
+// --- Types ---
+type TimeFilter = 'week' | 'month' | 'year';
+
+interface DailyGoal {
+    id: string; // date string
+    date: string;
+    jesus: boolean;
+    hungryOnly: boolean; // some variance in field names (check DailyLog vs Goals)
+    noAlcohol: boolean;
+    noSoda: boolean;
+    phoneFree: boolean;
+    phoneFreeEvening: boolean; // New field name in DailyLog
+    declutteredItem?: string;
+    completed?: boolean;
+}
+
+interface FoodLog {
+    id: string; // date string
+    date: string;
+    eatWhenHungry: boolean;
+    noAlcohol: boolean;
+    noSodas: boolean;
+    caloriesColor: string;
+}
+
+
+// --- Targets (Fallback Defaults) ---
+// We keep these briefly as initial state or fallback but aim to replace usage.
+const DEFAULT_TARGETS = {
+    WEIGHT: 82,
+    JESUS: { week: 7, month: 30, year: 365 },
+    HUNGRY: { week: 6, month: 25, year: 300 },
+    CLEAN: { week: 6, month: 25, year: 300 },
+    PHONE: { week: 6, month: 25, year: 300 },
+    RUN: { week: 3.5, month: 15, year: 182.5 },
+    BIKE: { week: 35, month: 152, year: 1825 },
+    STRENGTH: { week: 2, month: 9, year: 104 },
+    NT_CHAPTERS: 260,
+    BOOKS: { week: 0, month: 1, year: 12 },
+    DECLUTTER: { week: 1, month: 4, year: 52 }
+};
 
 export default function Dashboard() {
-    const [activeTab, setActiveTab] = useState<Tab>('Weekly');
-    const [goalWeight, setGoalWeight] = useState(85);
+    const [timeFilter, setTimeFilter] = useState<TimeFilter>('week');
 
-    // Data States
+    // --- Data State ---
+    const [goalsConfig, setGoalsConfig] = useState<any[]>([]); // Dynamic Goals from Settings
     const [weightLogs, setWeightLogs] = useState<any[]>([]);
     const [cardioLogs, setCardioLogs] = useState<any[]>([]);
     const [strengthLogs, setStrengthLogs] = useState<any[]>([]);
-    const [bodyweightLogs, setBodyweightLogs] = useState<any[]>([]);
-    const [foodLogs, setFoodLogs] = useState<any[]>([]);
-
-    // New Data States for Fellowship & Sunday Review
-    const [dailyGoalsLogs, setDailyGoalsLogs] = useState<any[]>([]);
+    const [dailyGoalsLogs, setDailyGoalsLogs] = useState<DailyGoal[]>([]);
+    const [foodLogs, setFoodLogs] = useState<FoodLog[]>([]); // specific day_food_logs
     const [fellowshipLogs, setFellowshipLogs] = useState<any[]>([]);
-    const [prayerCardsLogs, setPrayerCardsLogs] = useState<any[]>([]);
+    const [bookLogs, setBookLogs] = useState<any[]>([]);
+    const [declutterCollectionLogs, setDeclutterCollectionLogs] = useState<any[]>([]);
 
+    // --- Loading ---
     useEffect(() => {
-        // Fetch Settings
-        getDoc(doc(db, 'settings', 'global')).then(snap => {
-            if (snap.exists() && snap.data().targetWeight) {
-                setGoalWeight(snap.data().targetWeight);
-            }
+        const unsubGoals = onSnapshot(collection(db, 'goals'), s => {
+            const goals = s.docs.map(d => ({ id: d.id, ...d.data() }));
+            setGoalsConfig(goals);
         });
 
         const unsubWeight = onSnapshot(query(collection(db, 'weight_logs'), orderBy('date', 'desc')), s => setWeightLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
         const unsubCardio = onSnapshot(query(collection(db, 'cardio_logs'), orderBy('date', 'desc')), s => setCardioLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
         const unsubStrength = onSnapshot(query(collection(db, 'workouts'), orderBy('date', 'desc')), s => setStrengthLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-        const unsubBodyweight = onSnapshot(query(collection(db, 'bodyweight_logs'), orderBy('date', 'desc')), s => setBodyweightLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-        const unsubFood = onSnapshot(query(collection(db, 'food_logs'), orderBy('date', 'desc')), s => setFoodLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-
-        // Fellowship Data
-        const unsubDailyGoals = onSnapshot(collection(db, 'daily_goals'), s => setDailyGoalsLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        const unsubFood = onSnapshot(query(collection(db, 'day_food_logs'), orderBy('date', 'desc')), s => setFoodLogs(s.docs.map(d => ({ id: d.id, ...d.data() } as FoodLog))));
+        const unsubDailyGoals = onSnapshot(collection(db, 'daily_goals'), s => setDailyGoalsLogs(s.docs.map(d => ({ id: d.id, ...d.data() } as DailyGoal))));
         const unsubFellowship = onSnapshot(collection(db, 'fellowship_logs'), s => setFellowshipLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-        const unsubPrayerCards = onSnapshot(collection(db, 'prayer_cards'), s => setPrayerCardsLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        const unsubBooks = onSnapshot(collection(db, 'books'), s => setBookLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        const unsubDeclutter = onSnapshot(collection(db, 'declutter_items'), s => setDeclutterCollectionLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
 
         return () => {
-            unsubWeight(); unsubCardio(); unsubStrength(); unsubBodyweight(); unsubFood();
-            unsubDailyGoals(); unsubFellowship(); unsubPrayerCards();
+            unsubGoals();
+            unsubWeight(); unsubCardio(); unsubStrength();
+            unsubFood(); unsubDailyGoals(); unsubFellowship(); unsubBooks();
+            unsubDeclutter();
         };
     }, []);
 
-    // Streak Logic
-    const streak = useMemo(() => {
-        const allLogs = [...weightLogs, ...cardioLogs, ...strengthLogs, ...bodyweightLogs, ...foodLogs];
-        const loggedDates = new Set(allLogs.map(l => format(l.date.toDate(), 'yyyy-MM-dd')));
-
-        let current = new Date();
-        // If today isn't logged, check if yesterday was to maintain streak
-        if (!loggedDates.has(format(current, 'yyyy-MM-dd'))) {
-            const yesterday = subDays(current, 1);
-            if (!loggedDates.has(format(yesterday, 'yyyy-MM-dd'))) {
-                return 0;
-            }
-            current = yesterday; // Start counting from yesterday
+    // Helper to get target from dynamic config or fallback
+    const getTarget = (slug: string, period: TimeFilter | 'fixed') => {
+        const goal = goalsConfig.find(g => g.slug === slug);
+        if (!goal) {
+            // Fallback logic
+            if (slug === 'weight') return DEFAULT_TARGETS.WEIGHT;
+            // Map simple slugs to default keys for temporary safety
+            const map: Record<string, any> = {
+                'jesus': DEFAULT_TARGETS.JESUS,
+                'hungry': DEFAULT_TARGETS.HUNGRY,
+                'clean': DEFAULT_TARGETS.CLEAN,
+                'phone': DEFAULT_TARGETS.PHONE,
+                'run': DEFAULT_TARGETS.RUN,
+                'bike': DEFAULT_TARGETS.BIKE,
+                'strength': DEFAULT_TARGETS.STRENGTH,
+                'nt': DEFAULT_TARGETS.NT_CHAPTERS,
+                'books': DEFAULT_TARGETS.BOOKS,
+                'declutter': DEFAULT_TARGETS.DECLUTTER
+            };
+            const def = map[slug];
+            if (typeof def === 'number') return def;
+            if (def && period !== 'fixed') return def[period];
+            return 0;
         }
 
-        let count = 0;
-        while (loggedDates.has(format(current, 'yyyy-MM-dd'))) {
-            count++;
-            current = subDays(current, 1);
-        }
-        return count;
-    }, [weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs]);
+        if (period === 'fixed') return goal.yearlyTarget; // Usually fixed targets are yearly or single value
+        if (period === 'week') return goal.weeklyTarget;
+        if (period === 'month') return goal.monthlyTarget;
+        if (period === 'year') return goal.yearlyTarget;
+        return 0;
+    };
 
-    // Aggregation Logic for Charts
-    const stats = useMemo(() => {
-        const now = new Date();
-        const filterFn = (date: Timestamp) => {
-            const d = date.toDate();
-            if (activeTab === 'Daily') return isSameDay(d, now);
-            if (activeTab === 'Weekly') return isSameWeek(d, now, { weekStartsOn: 1 });
-            if (activeTab === 'Monthly') return isSameMonth(d, now);
-            return true;
+
+    // --- Calculations ---
+    const today = new Date();
+    // Start of custom year or calendar year? Using custom for 'year' filter as per previous logic
+    const START_OF_YEAR = new Date('2025-12-28');
+
+    const dateRange = useMemo(() => {
+        if (timeFilter === 'week') {
+            return { start: startOfWeek(today, { weekStartsOn: 0 }), end: endOfWeek(today, { weekStartsOn: 0 }) };
+        } else if (timeFilter === 'month') {
+            return { start: startOfMonth(today), end: endOfMonth(today) };
+        } else {
+            // Year - use custom start date
+            return { start: START_OF_YEAR, end: new Date('2026-12-31') }; // Approx end
+        }
+    }, [timeFilter]);
+
+    // 1. Habits Progress
+    const habitsStats = useMemo(() => {
+        const isInRange = (d: Date) => d >= dateRange.start && d <= dateRange.end;
+
+        const checkLog = (logs: any[], checkFn: (l: any) => boolean) => {
+            return logs.filter(l => {
+                const d = new Date(l.date || l.id); // support both Timestamp and string ID dates
+                return isInRange(d) && checkFn(l);
+            }).length;
         };
 
-        const filteredWeight = weightLogs.filter(l => filterFn(l.date));
-        const filteredCardio = cardioLogs.filter(l => filterFn(l.date));
-        const filteredStrength = strengthLogs.filter(l => filterFn(l.date));
-        const filteredBodyweight = bodyweightLogs.filter(l => filterFn(l.date));
-        const filteredFood = foodLogs.filter(l => filterFn(l.date));
+        const jesus = checkLog(dailyGoalsLogs, g => g.jesus);
+        const hungry = checkLog(foodLogs, l => l.eatWhenHungry);
+        const clean = checkLog(foodLogs, l => l.noAlcohol && l.noSodas);
+        const phone = checkLog(dailyGoalsLogs, l => l.phoneFree || l.phoneFreeEvening);
 
-        // Split Cardio
-        const filteredCycling = filteredCardio.filter(l => l.equipment !== 'Running');
-        const filteredRunning = filteredCardio.filter(l => l.equipment === 'Running');
+        return {
+            jesus: { val: jesus, target: getTarget('jesus', timeFilter) },
+            hungry: { val: hungry, target: getTarget('hungry', timeFilter) },
+            clean: { val: clean, target: getTarget('clean', timeFilter) },
+            phone: { val: phone, target: getTarget('phone', timeFilter) }
+        };
+    }, [dailyGoalsLogs, foodLogs, dateRange, timeFilter, goalsConfig]);
+
+
+    // 2. Physical & Life Progress
+    const physicalStats = useMemo(() => {
+        const isInRange = (d: Date) => d >= dateRange.start && d <= dateRange.end;
+
+        const runLogs = cardioLogs.filter(l => l.equipment === 'Running' && isInRange(l.date.toDate()));
+        const bikeLogs = cardioLogs.filter(l => l.equipment !== 'Running' && isInRange(l.date.toDate()));
+        const strengthInPeriod = strengthLogs.filter(l => isInRange(l.date.toDate()));
+
+        const runTotal = runLogs.reduce((a, b) => a + (b.distance || 0), 0);
+        const bikeTotal = bikeLogs.reduce((a, b) => a + (b.distance || 0), 0);
+
+        // Count Unique workout days (Sets -> Workouts)
+        const uniqueWorkoutDates = new Set(strengthInPeriod.map(l => l.date.toDate().toDateString()));
+        const strengthCount = uniqueWorkoutDates.size;
 
         // Weight
-        const latestWeight = weightLogs.length > 0 ? weightLogs[0].weight : 0;
-        const avgWeight = filteredWeight.length > 0
-            ? (filteredWeight.reduce((a, b) => a + b.weight, 0) / filteredWeight.length).toFixed(1)
-            : latestWeight.toFixed(1);
+        const currentWeight = weightLogs.length > 0 ? weightLogs[0].weight : 0;
 
-        // Cardio Totals
-        const cardioDur = filteredCardio.reduce((a, b) => a + b.duration, 0);
-        const cardioDist = filteredCardio.reduce((a, b) => a + b.distance, 0);
-        const cardioCals = filteredCardio.reduce((a, b) => a + b.calories, 0);
+        // Declutter (New 'declutter_items' + Legacy 'daily_goals')
+        const newDeclutterInPeriod = declutterCollectionLogs.filter(d => isInRange(d.date.toDate()));
+        const legacyDeclutterInPeriod = dailyGoalsLogs.filter(d => d.declutteredItem && d.declutteredItem.trim().length > 0 && isInRange(new Date(d.id)));
 
-        // Cycling Specific
-        const cyclingDur = filteredCycling.reduce((a, b) => a + b.duration, 0);
-        const cyclingDist = filteredCycling.reduce((a, b) => a + b.distance, 0);
+        const declutterTotal = newDeclutterInPeriod.length + legacyDeclutterInPeriod.length;
 
-        // Running Specific
-        const runningDur = filteredRunning.reduce((a, b) => a + b.duration, 0);
-        const runningDist = filteredRunning.reduce((a, b) => a + b.distance, 0);
-
-        // Strength
-        const workoutCount = filteredStrength.length;
-        const totalVolume = filteredStrength.reduce((a, b) => a + (b.weight * b.reps), 0);
-
-        // Bodyweight
-        const bwCount = filteredBodyweight.length;
-
-        // Food
-        const foodScoreMap = { green: 3, yellow: 2, orange: 1, red: 0 };
-        const avgFoodScore = filteredFood.length > 0
-            ? filteredFood.reduce((a, b) => a + (foodScoreMap[b.status as keyof typeof foodScoreMap] || 0), 0) / filteredFood.length
-            : 0;
-
-        // Goal Targets
-        const TARGETS = {
-            Weekly: { run: 3.5, bike: 35, workouts: 3 },
-            Monthly: { run: 15, bike: 150, workouts: 13 }, // Approx
-            Overall: { run: 182.5, bike: 1825, workouts: 156 }, // 2026 Goals
-            Daily: { run: 0.5, bike: 5, workouts: 0 } // Rough daily avg
-        };
-        const currentTargets = TARGETS[activeTab];
+        // Books: Count 'books' where progress === 100 AND finishedAt in range
+        const booksRead = bookLogs.filter(b => b.progress === 100 && b.finishedAt && isInRange(b.finishedAt.toDate())).length;
 
         return {
-            avgWeight,
-            latestWeight,
-            cardioDur,
-            cardioDist,
-            cardioCals,
-            cyclingDur,
-            cyclingDist,
-            runningDur,
-            runningDist,
-            workoutCount, // Renamed from setsCount
-            totalVolume,
-            bwCount,
-            avgFoodScore,
-            filteredWeight,
-            filteredCardio,
-            filteredFood,
-            filteredStrength,
-            currentTargets
+            run: runTotal,
+            bike: bikeTotal,
+            strength: strengthCount,
+            currentWeight,
+            declutter: declutterTotal,
+            books: booksRead
         };
-    }, [activeTab, weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs]);
+    }, [cardioLogs, strengthLogs, weightLogs, dailyGoalsLogs, declutterCollectionLogs, bookLogs, dateRange]);
 
-    // Sunday Review Logic
-    const sundayReviewData = useMemo(() => {
-        const today = new Date();
-        if (!isSunday(today)) return null;
-
-        const startOfCurrentWeek = startOfWeek(today, { weekStartsOn: 1 }); // Monday
-        const endOfCurrentWeek = endOfWeek(today, { weekStartsOn: 1 }); // Sunday
-
-        const filterByCurrentWeek = (logDate: Timestamp) => {
-            const date = logDate.toDate();
-            return date >= startOfCurrentWeek && date <= endOfCurrentWeek;
-        };
-
-        const weeklyDailyGoals = dailyGoalsLogs.filter(l => filterByCurrentWeek(l.date));
-        const weeklyFellowshipLogs = fellowshipLogs.filter(l => filterByCurrentWeek(l.date));
-        const weeklyPrayerCards = prayerCardsLogs.filter(l => filterByCurrentWeek(l.date));
-
-        const dailyGoalsCompleted = weeklyDailyGoals.filter(l => l.completed).length;
-        const dailyGoalsTotal = weeklyDailyGoals.length;
-        const fellowshipCount = weeklyFellowshipLogs.length;
-        const prayerCardsCount = weeklyPrayerCards.length;
-
-        return {
-            dailyGoalsCompleted,
-            dailyGoalsTotal,
-            fellowshipCount,
-            prayerCardsCount,
-            weekStartDate: format(startOfCurrentWeek, 'MMM dd'),
-            weekEndDate: format(endOfCurrentWeek, 'MMM dd'),
-        };
-    }, [dailyGoalsLogs, fellowshipLogs, prayerCardsLogs]);
-
-    // Gamification & Badges
-    const gamification = useMemo(() => {
-        // 1. Calculate XP
-        let totalXp = 0;
-        totalXp += weightLogs.length * 50;
-        const totalDist = cardioLogs.reduce((acc, log) => acc + (log.distance || 0), 0);
-        totalXp += Math.floor(totalDist * 10);
-        totalXp += strengthLogs.length * 20;
-        const totalBwReps = bodyweightLogs.reduce((acc, log) => acc + (log.count || 0), 0);
-        totalXp += totalBwReps;
-        const foodXp = foodLogs.reduce((acc, log) => {
-            if (log.status === 'green') return acc + 50;
-            if (log.status === 'yellow') return acc + 30;
-            if (log.status === 'orange') return acc + 10;
-            return acc + 5;
-        }, 0);
-        totalXp += foodXp;
-
-        // Add Fellowship XP
-        const totalChapters = fellowshipLogs.reduce((acc, log) => acc + (log.chaptersRead?.length || 0), 0);
-        totalXp += totalChapters * 10; // 10 XP per chapter
-        totalXp += prayerCardsLogs.length * 25; // 25 XP per prayer card created
-
-        const level = Math.floor(totalXp / 1000) + 1;
-        const currentLevelStart = (level - 1) * 1000;
-        const progressToNextLevel = ((totalXp - currentLevelStart) / (1000)) * 100;
-
-        // 2. Calculate Stats for Badges
-        const totalWorkouts = strengthLogs.length;
-        const totalGreenFood = foodLogs.filter(l => l.status === 'green').length;
-
-        // Time based stats
-        let earlyBird = 0, nightOwl = 0, weekend = 0;
-        const processTime = (d: Date) => {
-            const h = getHours(d);
-            if (h >= 4 && h < 9) earlyBird++;
-            if (h >= 20 || h < 2) nightOwl++;
-            if (isWeekend(d)) weekend++;
-        };
-        const allLogDates: Date[] = [
-            ...weightLogs.map(l => l.date.toDate()),
-            ...cardioLogs.map(l => l.date.toDate()),
-            ...strengthLogs.map(l => l.date.toDate()),
-            ...bodyweightLogs.map(l => l.date.toDate()),
-            ...foodLogs.map(l => l.date.toDate())
-        ];
-        allLogDates.forEach(d => processTime(d));
-
-        const badgeList = calculateBadges({
-            streak,
-            totalDist,
-            totalWorkouts,
-            totalGreenFood,
-            level,
-            totalBwReps,
-            earlyBirdCount: earlyBird,
-            nightOwlCount: nightOwl,
-            weekendCount: weekend,
-            totalChaptersRead: totalChapters,
-            totalPrayerCards: prayerCardsLogs.length
-        });
-
-        // Group Badges by ID to show only relevant ones (Highest Earned + Next Target)
-        const badgeGroups: Record<string, { earned: BadgeDef | null; next: BadgeDef | null }> = {};
-        badgeList.forEach(b => {
-            if (!badgeGroups[b.groupId]) badgeGroups[b.groupId] = { earned: null, next: null };
-            if (b.isEarned) {
-                const current = badgeGroups[b.groupId].earned;
-                if (!current || (b.target || 0) > (current.target || 0)) badgeGroups[b.groupId].earned = b;
-            } else {
-                const currentNext = badgeGroups[b.groupId].next;
-                if (!currentNext || (b.target || 0) < (currentNext.target || 0)) badgeGroups[b.groupId].next = b;
+    // 3. NT Progress (Total or Period?)
+    // "Read NT in a year" is a long term goal.
+    // If filter is Week, user might want to know chapters read THIS WEEK vs Target Pace?
+    // Let's show "Chapters read in period" vs "Target Pace for period"?
+    // Or just keep it as "Total Progress" if Year, but "Pace" if Week.
+    // Let's stick to "Chapters Read in Period" for now vs a calculated target.
+    const ntStats = useMemo(() => {
+        let chapters = 0;
+        fellowshipLogs.forEach(l => {
+            // Assuming l.date is a string in 'yyyy-MM-dd' format for comparison
+            // Firebase Timestamps need .toDate()
+            const logDate = new Date(l.date);
+            if (logDate >= dateRange.start && logDate <= dateRange.end) {
+                if (Array.isArray(l.chaptersRead)) {
+                    chapters += l.chaptersRead.length;
+                }
             }
         });
-        const displayBadges = Object.values(badgeGroups).map(g => g.earned || g.next).filter(Boolean) as BadgeDef[];
 
-        return { xp: totalXp, level, progressToNextLevel, badgeList, displayBadges };
-    }, [weightLogs, cardioLogs, strengthLogs, bodyweightLogs, foodLogs, streak, fellowshipLogs, prayerCardsLogs]);
+        const target = getTarget('nt', timeFilter);
 
-    // Chart Data
-    const weightChartData = useMemo(() => {
-        const data = stats.filteredWeight
-            .map(log => ({
-                date: format(log.date.toDate(), 'MMM dd'),
-                weight: log.weight,
-            }))
-            .reverse(); // Display chronologically
-        return data;
-    }, [stats.filteredWeight]);
+        return { chapters, target };
+    }, [fellowshipLogs, dateRange, timeFilter, goalsConfig]);
 
-    const activityDistribution = useMemo(() => {
-        const data = [
-            { name: 'Cardio', value: stats.cardioDur || 1, color: '#06b6d4' },
-            { name: 'Strength', value: stats.workoutCount * 3 || 1, color: '#f43f5e' },
-            { name: 'Bodyweight', value: stats.bwCount * 2 || 1, color: '#8b5cf6' },
-            { name: 'Nutrition', value: stats.avgFoodScore * 10 || 1, color: '#22c55e' },
-        ];
-        // Filter out entries with value 0 or 1 (if it's just a placeholder)
-        return data.filter(d => d.value > 1 || (d.name === 'Nutrition' && d.value > 0));
-    }, [stats.cardioDur, stats.workoutCount, stats.bwCount, stats.avgFoodScore]);
 
+
+
+
+    // 5. Diagrams Data
+
+
+
+    // -- RENDER TARGET GETTERS --
+    const t_declutter = getTarget('declutter', timeFilter);
+    const t_books = getTarget('books', timeFilter);
+    const t_run = getTarget('run', timeFilter);
+    const t_bike = getTarget('bike', timeFilter);
+    const t_strength = getTarget('strength', timeFilter);
+
+    // Special Weight Calculation
+    const t_weight = useMemo(() => {
+        const wGoal = goalsConfig.find(g => g.slug === 'weight');
+        if (!wGoal) return getTarget('weight', 'fixed');
+
+        const current = physicalStats.currentWeight;
+        const target = wGoal.yearlyTarget;
+
+        if (timeFilter === 'year') return target; // Year view shows final goal
+
+        const endDate = wGoal.endDate ? new Date(wGoal.endDate) : new Date();
+        const now = new Date();
+        const diffTime = endDate.getTime() - now.getTime();
+        const weeksLeft = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 7)));
+
+        const amountToLose = Math.max(0, current - target);
+        // Rate needed to hit goal on time
+        const weeklyRate = amountToLose / weeksLeft;
+
+        if (timeFilter === 'week') {
+            // Target for end of this week
+            return Number((current - weeklyRate).toFixed(1));
+        }
+        if (timeFilter === 'month') {
+            // Target for end of this month (approx 4.3 weeks)
+            return Number((current - (weeklyRate * 4.345)).toFixed(1));
+        }
+
+        return target;
+    }, [goalsConfig, timeFilter, physicalStats.currentWeight]);
+
+
+    // Dynamic Colors
+    const getGoalColor = (slug: string, fallback: string) => {
+        const g = goalsConfig.find(c => c.slug === slug);
+        return g?.color || fallback;
+    };
+
+    const c_jesus = getGoalColor('jesus', 'amber');
+    const c_hungry = getGoalColor('hungry', 'emerald');
+    const c_clean = getGoalColor('clean', 'blue');
+    const c_phone = getGoalColor('phone', 'purple');
+
+    const c_declutter = getGoalColor('declutter', 'slate');
+    const c_books = getGoalColor('books', 'indigo');
+    const c_nt = getGoalColor('nt', 'amber');
+    const c_weight = getGoalColor('weight', 'rose');
+
+    const c_run = getGoalColor('run', 'cyan');
+    const c_bike = getGoalColor('bike', 'indigo');
+    const c_strength = getGoalColor('strength', 'emerald');
+
+    // -- RENDER --
     return (
         <Layout>
-            {sundayReviewData && (
-                <Card className="mb-6 bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
-                    <div className="flex justify-between items-center mb-4">
-                        <CardTitle className="text-white">Sunday Review ({sundayReviewData.weekStartDate} - {sundayReviewData.weekEndDate})</CardTitle>
-                        <Calendar size={24} className="text-blue-200" />
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="bg-white/10 p-4 rounded-lg flex flex-col items-center">
-                            <BookOpen size={24} className="mb-2 text-blue-200" />
-                            <p className="text-lg font-bold">{sundayReviewData.dailyGoalsCompleted}/{sundayReviewData.dailyGoalsTotal}</p>
-                            <p className="text-sm text-blue-100">Daily Goals</p>
-                        </div>
-                        <div className="bg-white/10 p-4 rounded-lg flex flex-col items-center">
-                            <Heart size={24} className="mb-2 text-blue-200" />
-                            <p className="text-lg font-bold">{sundayReviewData.fellowshipCount}</p>
-                            <p className="text-sm text-blue-100">Fellowship Logs</p>
-                        </div>
-                        <div className="bg-white/10 p-4 rounded-lg flex flex-col items-center">
-                            <Activity size={24} className="mb-2 text-blue-200" />
-                            <p className="text-lg font-bold">{stats.workoutCount + stats.filteredCardio.length}</p>
-                            <p className="text-sm text-blue-100">Workouts</p>
-                        </div>
-                        <div className="bg-white/10 p-4 rounded-lg flex flex-col items-center">
-                            <Apple size={24} className="mb-2 text-blue-200" />
-                            <p className="text-lg font-bold">{stats.avgFoodScore.toFixed(1)}</p>
-                            <p className="text-sm text-blue-100">Avg Food Score</p>
-                        </div>
-                    </div>
-                </Card>
-            )}
-
             {/* Header */}
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-2">
+            <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h2 className="text-3xl font-bold text-brand-primary mb-1">Dashboard</h2>
-                    {gamification.displayBadges.length > 0 && gamification.displayBadges[0].tier === 'diamond' ? (
-                        <p className="text-slate-500">Legendary Status. <span className="font-bold text-cyan-500">Diamond Athlete</span></p>
-                    ) : (
-                        <p className="text-slate-500">Your results. <span className="font-medium text-emerald-600">Level {gamification.level} Athlete</span></p>
-                    )}
+                    <h2 className="text-3xl font-bold text-brand-primary mb-2">Goals 🚀</h2>
+                    <p className="text-slate-500">Track your progress and stay consistent.</p>
                 </div>
 
-                <div className="bg-white p-1 rounded-xl border border-slate-200 flex shadow-sm">
-                    {(['Daily', 'Weekly', 'Monthly', 'Overall'] as Tab[]).map((tab) => (
+                {/* Time Filter Controls */}
+                <div className="flex bg-slate-100 p-1 rounded-xl self-start md:self-auto">
+                    {(['week', 'month', 'year'] as TimeFilter[]).map((filter) => (
                         <button
-                            key={tab}
-                            onClick={() => setActiveTab(tab)}
+                            key={filter}
+                            onClick={() => setTimeFilter(filter)}
                             className={clsx(
-                                "px-4 py-2 rounded-lg text-sm font-bold transition-all",
-                                activeTab === tab ? "bg-brand-primary text-white shadow-md" : "text-slate-500 hover:bg-slate-50"
+                                "px-4 py-2 rounded-lg text-sm font-bold capitalize transition-all",
+                                timeFilter === filter ? "bg-white text-brand-primary shadow-sm" : "text-slate-500 hover:text-slate-700"
                             )}
                         >
-                            {tab}
+                            {filter}
                         </button>
                     ))}
                 </div>
             </header>
 
-            {/* Level & Badges Row (Keep as is) */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <div className="md:col-span-1 relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 p-6 text-white shadow-lg">
-                    {/* ... Level Card Logic ... */}
-                    <div className="relative z-10 flex flex-col h-full justify-between">
-                        <div className="flex justify-between items-start">
+            <div className="space-y-8">
+                {/* --- 1. LIFE GOALS GRID (Declutter, Books, Weight, NT) --- */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {/* Declutter */}
+                    <Card className={clsx("p-4 md:p-6", `bg-${c_declutter}-50 border-${c_declutter}-200`)}>
+                        <div className="flex items-center gap-2 mb-4">
+                            <div className={clsx("p-2 bg-white rounded-lg shadow-sm", `text-${c_declutter}-600`)}>
+                                <Trash2 size={24} />
+                            </div>
+                            <h4 className="font-bold text-slate-700">Decluttering</h4>
+                        </div>
+                        <div className="flex justify-between items-end mb-2">
                             <div>
-                                <p className="text-slate-400 font-medium text-sm mb-1">Current Level</p>
-                                <h3 className="text-4xl font-bold text-white">{gamification.level}</h3>
+                                <span className="text-3xl font-bold text-slate-800">{physicalStats.declutter}</span>
+                                <span className="text-sm text-slate-500 ml-1">/ {t_declutter} items</span>
                             </div>
-                            <Crown className="text-amber-400" size={32} />
+                            <span className={clsx("text-sm font-bold", `text-${c_declutter}-600`)}>{Math.round((physicalStats.declutter / (t_declutter || 1)) * 100)}%</span>
                         </div>
+                        <div className="w-full bg-slate-200 rounded-full h-2">
+                            <div className={clsx("h-2 rounded-full transition-all duration-500", `bg-${c_declutter}-600`)} style={{ width: `${Math.min(100, (physicalStats.declutter / (t_declutter || 1)) * 100)}%` }}></div>
+                        </div>
+                    </Card>
 
-                        <div className="mt-6">
-                            <div className="flex justify-between text-xs text-slate-400 mb-2">
-                                <span>{Math.floor(gamification.xp)} XP</span>
-                                <span>{Math.floor(100 - gamification.progressToNextLevel)}% to next</span>
+                    {/* Books Read */}
+                    <Card className={clsx("p-4 md:p-6", `bg-${c_books}-50 border-${c_books}-200`)}>
+                        <div className="flex items-center gap-2 mb-4">
+                            <div className={clsx("p-2 bg-white rounded-lg shadow-sm", `text-${c_books}-600`)}>
+                                <BookOpen size={24} />
                             </div>
-                            <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
-                                <div
-                                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
-                                    style={{ width: `${gamification.progressToNextLevel}%` }}
-                                />
+                            <div>
+                                <h4 className="font-bold text-slate-700">Books Read</h4>
                             </div>
                         </div>
-                    </div>
+                        <div className="flex justify-between items-end mb-2">
+                            <div>
+                                <span className="text-3xl font-bold text-slate-800">{physicalStats.books}</span>
+                                <span className="text-sm text-slate-500 ml-1">/ {t_books} books</span>
+                            </div>
+                            <span className={clsx("text-sm font-bold", `text-${c_books}-600`)}>{Math.round((physicalStats.books / Math.max(1, t_books)) * 100)}%</span>
+                        </div>
+                        <div className={clsx("w-full rounded-full h-2", `bg-${c_books}-200/50`)}>
+                            <div className={clsx("h-2 rounded-full transition-all duration-500", `bg-${c_books}-500`)} style={{ width: `${Math.min(100, (physicalStats.books / Math.max(1, t_books)) * 100)}%` }}></div>
+                        </div>
+                    </Card>
+
+                    {/* New Testament */}
+                    <Card className={clsx("p-4 md:p-6", `bg-${c_nt}-50 border-${c_nt}-200`)}>
+                        <div className="flex items-center gap-2 mb-4">
+                            <div className={clsx("p-2 bg-white rounded-lg shadow-sm", `text-${c_nt}-600`)}>
+                                <BookOpen size={24} />
+                            </div>
+                            <div>
+                                <h4 className="font-bold text-slate-700">New Testament</h4>
+                            </div>
+                        </div>
+                        <div className="flex justify-between items-end mb-2">
+                            <div>
+                                <span className="text-3xl font-bold text-slate-800">{ntStats.chapters}</span>
+                                <span className="text-sm text-slate-500 ml-1">/ {ntStats.target} ch</span>
+                            </div>
+                            <span className={clsx("text-sm font-bold", ntStats.chapters >= ntStats.target ? "text-emerald-500" : `text-${c_nt}-500`)}>
+                                {Math.round((ntStats.chapters / Math.max(1, ntStats.target)) * 100)}%
+                            </span>
+                        </div>
+                        <div className={clsx("w-full rounded-full h-2", `bg-${c_nt}-200/50`)}>
+                            <div className={clsx("h-2 rounded-full transition-all duration-500", `bg-${c_nt}-500`)} style={{ width: `${Math.min(100, (ntStats.chapters / Math.max(1, ntStats.target)) * 100)}%` }}></div>
+                        </div>
+                    </Card>
+
+                    {/* Weight (Dynamic Target) */}
+                    <Card className={clsx("p-4 md:p-6 relative overflow-hidden transition-all", `bg-${c_weight}-50 border-${c_weight}-200`)}>
+                        <div className="flex items-center gap-2 mb-4 relative z-10">
+                            <div className={clsx("p-2 bg-white rounded-lg shadow-sm", `text-${c_weight}-600`)}>
+                                <Scale size={24} />
+                            </div>
+                            <h4 className="font-bold text-slate-700">Weight Goal</h4>
+                            <span className="ml-auto text-xs font-bold uppercase bg-white/50 px-2 py-1 rounded text-slate-500">{timeFilter}ly Target</span>
+                        </div>
+                        <div className="flex justify-between items-end mb-2 relative z-10">
+                            <div>
+                                <span className="text-3xl font-bold text-slate-800">{physicalStats.currentWeight}</span>
+                                <span className="text-sm text-slate-500 ml-1">/ {t_weight} kg</span>
+                            </div>
+                        </div>
+                        <p className={clsx("text-xs mt-2 font-bold text-right", `text-${c_weight}-500`)}>
+                            {physicalStats.currentWeight <= t_weight ? "Target Reached! 🎉" : `-${(physicalStats.currentWeight - t_weight).toFixed(1)} kg to go`}
+                        </p>
+                    </Card>
                 </div>
 
-                {/* Badge Showcase (Keep as is just simplified in this replacement block if needed, but trying to preserve) */}
-                <Card className="md:col-span-2 flex flex-col">
-                    <CardTitle>Achievements</CardTitle>
-                    <div className="mt-4 flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
-                        {gamification.displayBadges.sort((a, b) => (a.isEarned === b.isEarned) ? 0 : a.isEarned ? -1 : 1).map((badge) => (
-                            <div key={badge.id} className={clsx("flex-shrink-0 w-32 flex flex-col items-center p-3 rounded-xl border transition-all relative group",
-                                badge.isEarned ? "bg-white border-slate-200 shadow-sm" : "bg-slate-50 border-slate-100 opacity-70"
-                            )}>
-                                <div className={clsx("w-12 h-12 rounded-full flex items-center justify-center mb-2 shadow-inner",
-                                    badge.tier === 'bronze' && "bg-orange-100 text-orange-700",
-                                    badge.tier === 'silver' && "bg-slate-200 text-slate-600",
-                                    badge.tier === 'gold' && "bg-amber-100 text-amber-600",
-                                    badge.tier === 'platinum' && "bg-cyan-100 text-cyan-600",
-                                    badge.tier === 'diamond' && "bg-fuchsia-100 text-fuchsia-600",
-                                )}>
-                                    <badge.icon size={24} />
-                                </div>
-                                <p className="text-xs font-bold text-center text-slate-800 line-clamp-1 truncate w-full">{badge.name}</p>
-                                <p className="text-[10px] text-center text-slate-500 mb-2 h-6 leading-tight line-clamp-2">{badge.description}</p>
-                                {badge.isEarned ? (
-                                    <span className={clsx("text-[9px] font-bold uppercase px-2 py-0.5 rounded-full mt-auto",
-                                        badge.tier === 'bronze' && "bg-orange-50 text-orange-700",
-                                        badge.tier === 'silver' && "bg-slate-100 text-slate-600",
-                                        badge.tier === 'gold' && "bg-amber-50 text-amber-700",
-                                        badge.tier === 'platinum' && "bg-cyan-50 text-cyan-700",
-                                        badge.tier === 'diamond' && "bg-fuchsia-50 text-fuchsia-700",
-                                    )}>{badge.tier}</span>
-                                ) : (
-                                    <div className="w-full bg-slate-200 h-1 rounded-full mt-auto">
-                                        <div className="bg-slate-400 h-1 rounded-full" style={{ width: `${Math.min(100, ((badge.progress || 0) / (badge.target || 1)) * 100)}%` }}></div>
-                                    </div>
-                                )}
+                {/* --- 2. HABITS GRID --- */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {/* Jesus */}
+                    <Card className="p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Crown size={20} className={clsx(`text-${c_jesus}-500`)} />
+                            <h4 className="font-bold text-slate-700 text-sm">Start w/ Jesus</h4>
+                        </div>
+                        <div className="flex justify-between text-sm mb-1">
+                            <span className={clsx("font-bold", habitsStats.jesus.val >= (habitsStats.jesus.target || 0) ? `text-${c_jesus}-500` : `text-${c_jesus}-700`)}>
+                                {Math.round((habitsStats.jesus.val / (habitsStats.jesus.target || 1)) * 100)}%
+                            </span>
+                            <span className={clsx(`text-${c_jesus}-700 font-medium`)}>
+                                {habitsStats.jesus.val} / {habitsStats.jesus.target} days
+                            </span>
+                        </div>
+                        <div className={clsx("w-full rounded-full h-2.5", `bg-${c_jesus}-100`)}>
+                            <div className={clsx("h-2.5 rounded-full", `bg-${c_jesus}-500`)} style={{ width: `${Math.min(100, (habitsStats.jesus.val / (habitsStats.jesus.target || 1)) * 100)}%` }}></div>
+                        </div>
+                    </Card>
+
+                    {/* Hungry */}
+                    <Card className="p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                            <UtensilsCrossed size={20} className={clsx(`text-${c_hungry}-500`)} />
+                            <h4 className="font-bold text-slate-700 text-sm">Hungry Only</h4>
+                        </div>
+                        <div className="flex justify-between text-sm mb-1">
+                            <span className={clsx("font-bold", habitsStats.hungry.val >= (habitsStats.hungry.target || 0) ? `text-${c_hungry}-500` : `text-${c_hungry}-700`)}>
+                                {Math.round((habitsStats.hungry.val / (habitsStats.hungry.target || 1)) * 100)}%
+                            </span>
+                            <span className={clsx(`text-${c_hungry}-700 font-medium`)}>
+                                {habitsStats.hungry.val} / {habitsStats.hungry.target} days
+                            </span>
+                        </div>
+                        <div className={clsx("w-full rounded-full h-2.5", `bg-${c_hungry}-100`)}>
+                            <div className={clsx("h-2.5 rounded-full", `bg-${c_hungry}-500`)} style={{ width: `${Math.min(100, (habitsStats.hungry.val / (habitsStats.hungry.target || 1)) * 100)}%` }}></div>
+                        </div>
+                    </Card>
+
+                    {/* Clean */}
+                    <Card className="p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Wine size={20} className={clsx(`text-${c_clean}-500`)} />
+                            <h4 className="font-bold text-slate-700 text-sm">No Alc/Soda</h4>
+                        </div>
+                        <div className="flex justify-between text-sm mb-1">
+                            <span className={clsx("font-bold", habitsStats.clean.val >= (habitsStats.clean.target || 0) ? `text-${c_clean}-500` : `text-${c_clean}-700`)}>
+                                {Math.round((habitsStats.clean.val / (habitsStats.clean.target || 1)) * 100)}%
+                            </span>
+                            <span className={clsx(`text-${c_clean}-700 font-medium`)}>
+                                {habitsStats.clean.val} / {habitsStats.clean.target} days
+                            </span>
+                        </div>
+                        <div className={clsx("w-full rounded-full h-2.5", `bg-${c_clean}-100`)}>
+                            <div className={clsx("h-2.5 rounded-full", `bg-${c_clean}-500`)} style={{ width: `${Math.min(100, (habitsStats.clean.val / (habitsStats.clean.target || 1)) * 100)}%` }}></div>
+                        </div>
+                    </Card>
+
+                    {/* Phone */}
+                    <Card className="p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Smartphone size={20} className={clsx(`text-${c_phone}-500`)} />
+                            <h4 className="font-bold text-slate-700 text-sm">Phone Free</h4>
+                        </div>
+                        <div className="flex justify-between text-sm mb-1">
+                            <span className={clsx("font-bold", habitsStats.phone.val >= (habitsStats.phone.target || 0) ? `text-${c_phone}-500` : `text-${c_phone}-700`)}>
+                                {Math.round((habitsStats.phone.val / (habitsStats.phone.target || 1)) * 100)}%
+                            </span>
+                            <span className={clsx(`text-${c_phone}-700 font-medium`)}>
+                                {habitsStats.phone.val} / {habitsStats.phone.target} days
+                            </span>
+                        </div>
+                        <div className={clsx("w-full rounded-full h-2.5", `bg-${c_phone}-100`)}>
+                            <div className={clsx("h-2.5 rounded-full", `bg-${c_phone}-500`)} style={{ width: `${Math.min(100, (habitsStats.phone.val / (habitsStats.phone.target || 1)) * 100)}%` }}></div>
+                        </div>
+                    </Card>
+                </div>
+
+                {/* --- 3. SPORTS GOALS ROW --- */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {/* Run */}
+                    <Card className={clsx("p-4 md:p-6", `bg-${c_run}-50 border-${c_run}-200`)}>
+                        <div className="flex items-center gap-2 mb-4">
+                            <div className={clsx("p-2 bg-white rounded-lg shadow-sm", `text-${c_run}-600`)}>
+                                <Footprints size={24} />
                             </div>
-                        ))}
-                        {gamification.displayBadges.length === 0 && <div className="text-slate-400 text-sm p-4">Start working out to earn badges!</div>}
-                    </div>
-                </Card>
-            </div>
-
-            {/* Summary Cards - UPDATED with GOAL Context */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-
-                {/* 1. Weight */}
-                <Card className="border-l-4 border-l-brand-primary bg-gradient-to-br from-white to-slate-50">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Weight</p>
-                            <h3 className="text-3xl font-bold text-slate-800">{stats.latestWeight}<span className="text-sm font-normal text-slate-400 ml-1">kg</span></h3>
-                            <p className="text-xs text-slate-500 mt-1">
-                                Goal: <span className="font-medium text-brand-primary">{goalWeight} kg</span>
-                            </p>
+                            <h4 className="font-bold text-slate-700">Running</h4>
                         </div>
-                        <div className="p-3 bg-brand-primary/10 text-brand-primary rounded-xl">
-                            <Scale size={20} />
-                        </div>
-                    </div>
-                    <div className="mt-3 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-brand-primary" style={{ width: `${Math.min(100, Math.max(0, ((95 - stats.latestWeight) / (95 - goalWeight)) * 100))}%` }} />
-                    </div>
-                </Card>
-
-                {/* 2. Endurance (Run/Bike Combined View or Split?) -> Showing Combined Dist vs Target */}
-                <Card className="border-l-4 border-l-cyan-500 bg-gradient-to-br from-white to-cyan-50/30">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Endurance ({activeTab})</p>
-                            <div className="flex items-baseline gap-1">
-                                <h3 className="text-3xl font-bold text-slate-800">{stats.cardioDist.toFixed(1)}</h3>
-                                <span className="text-sm font-medium text-slate-400">/ {(stats.currentTargets.run + stats.currentTargets.bike).toFixed(1)} km</span>
+                        <div className="flex justify-between items-end mb-2">
+                            <div>
+                                <span className="text-3xl font-bold text-slate-800">{physicalStats.run.toFixed(1)}</span>
+                                <span className="text-sm text-slate-500 ml-1">/ {t_run} km</span>
                             </div>
-                            <p className="text-xs text-slate-500 mt-1">{stats.cardioCals} kcal burned</p>
+                            <span className={clsx("text-sm font-bold", `text-${c_run}-600`)}>{Math.round((physicalStats.run / (t_run || 1)) * 100)}%</span>
                         </div>
-                        <div className="p-3 bg-cyan-100/50 text-cyan-600 rounded-xl">
-                            <Bike size={20} />
+                        <div className="w-full bg-slate-200 rounded-full h-2">
+                            <div className={clsx("h-2 rounded-full", `bg-${c_run}-500`)} style={{ width: `${Math.min(100, (physicalStats.run / (t_run || 1)) * 100)}%` }}></div>
                         </div>
-                    </div>
-                    <div className="mt-3 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-cyan-500 transition-all duration-1000" style={{ width: `${Math.min(100, (stats.cardioDist / (stats.currentTargets.run + stats.currentTargets.bike)) * 100)}%` }} />
-                    </div>
-                </Card>
+                    </Card>
 
-                {/* 3. Training (Workouts) */}
-                <Card className="border-l-4 border-l-rose-500 bg-gradient-to-br from-white to-rose-50/30">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Workouts ({activeTab})</p>
-                            <div className="flex items-baseline gap-1">
-                                <h3 className="text-3xl font-bold text-slate-800">{stats.workoutCount}</h3>
-                                {activeTab !== 'Daily' && <span className="text-sm font-medium text-slate-400">/ {stats.currentTargets.workouts}</span>}
+                    {/* Bike */}
+                    <Card className={clsx("p-4 md:p-6", `bg-${c_bike}-50 border-${c_bike}-200`)}>
+                        <div className="flex items-center gap-2 mb-4">
+                            <div className={clsx("p-2 bg-white rounded-lg shadow-sm", `text-${c_bike}-600`)}>
+                                <Bike size={24} />
                             </div>
-                            <p className="text-xs text-slate-500 mt-1">Strength Sessions</p>
+                            <h4 className="font-bold text-slate-700">Cycling</h4>
                         </div>
-                        <div className="p-3 bg-rose-100/50 text-rose-600 rounded-xl">
-                            <Dumbbell size={20} />
-                        </div>
-                    </div>
-                    {activeTab !== 'Daily' && (
-                        <div className="mt-3 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-rose-500 transition-all duration-1000" style={{ width: `${Math.min(100, (stats.workoutCount / stats.currentTargets.workouts) * 100)}%` }} />
-                        </div>
-                    )}
-                </Card>
-
-                {/* 4. Nutrition */}
-                <Card className={clsx("border-l-4 bg-gradient-to-br from-white",
-                    stats.avgFoodScore > 2.5 ? "border-l-green-500 to-green-50/30" :
-                        stats.avgFoodScore > 1.5 ? "border-l-yellow-500 to-yellow-50/30" : "border-l-red-500 to-red-50/30"
-                )}>
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Nutrition ({activeTab})</p>
-                            <h3 className={clsx("text-3xl font-bold",
-                                stats.avgFoodScore > 2.5 ? "text-green-600" :
-                                    stats.avgFoodScore > 1.5 ? "text-yellow-600" : "text-red-600"
-                            )}>
-                                {stats.avgFoodScore > 2.5 ? "Great" : stats.avgFoodScore > 1.5 ? "Good" : "Fair"}
-                            </h3>
-                            <p className="text-xs text-slate-500 mt-1">Average Status</p>
-                        </div>
-                        <div className="p-3 bg-white/50 text-slate-600 rounded-xl shadow-sm">
-                            <Apple size={20} />
-                        </div>
-                    </div>
-                    <div className="mt-3 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className={clsx("h-full transition-all duration-1000",
-                            stats.avgFoodScore > 2.5 ? "bg-green-500" : stats.avgFoodScore > 1.5 ? "bg-yellow-500" : "bg-red-500"
-                        )} style={{ width: `${(stats.avgFoodScore / 3) * 100}%` }} />
-                    </div>
-                </Card>
-            </div>
-
-            {/* Main Content Areas */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-                {/* Weight Trend Chart */}
-                <Card className="lg:col-span-2">
-                    <div className="flex justify-between items-center mb-6">
-                        <CardTitle>Weight Trend ({activeTab})</CardTitle>
-                        <div className="flex gap-2">
-                            <div className="text-right">
-                                <span className="text-xs text-slate-400 block">Goal</span>
-                                <span className="font-bold text-emerald-600">{goalWeight.toFixed(1)} kg</span>
+                        <div className="flex justify-between items-end mb-2">
+                            <div>
+                                <span className="text-3xl font-bold text-slate-800">{physicalStats.bike.toFixed(1)}</span>
+                                <span className="text-sm text-slate-500 ml-1">/ {t_bike} km</span>
                             </div>
+                            <span className={clsx("text-sm font-bold", `text-${c_bike}-600`)}>{Math.round((physicalStats.bike / (t_bike || 1)) * 100)}%</span>
                         </div>
-                    </div>
+                        <div className="w-full bg-slate-200 rounded-full h-2">
+                            <div className={clsx("h-2 rounded-full", `bg-${c_bike}-500`)} style={{ width: `${Math.min(100, (physicalStats.bike / (t_bike || 1)) * 100)}%` }}></div>
+                        </div>
+                    </Card>
 
-                    <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={weightChartData}>
-                                <defs>
-                                    <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#003A59" stopOpacity={0.1} />
-                                        <stop offset="95%" stopColor="#003A59" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                                <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} minTickGap={30} />
-                                <YAxis domain={['dataMin - 1', 'dataMax + 1']} stroke="#94a3b8" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
-                                <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0', borderRadius: '8px' }} />
-                                <Area type="monotone" dataKey="weight" stroke="#003A59" strokeWidth={3} fill="url(#colorWeight)" animationDuration={1000} />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
-                </Card>
-
-                {/* Activity Breakdown */}
-                <div className="space-y-6">
-                    <Card className="flex flex-col h-full">
-                        <CardTitle>Activity Mix</CardTitle>
-                        <div className="flex-1 min-h-[250px] relative">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={activityDistribution}
-                                        innerRadius={60}
-                                        outerRadius={80}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                    >
-                                        {activityDistribution.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip />
-                                </PieChart>
-                            </ResponsiveContainer>
-                            {/* Center Text */}
-                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                <Activity className="text-slate-300 mb-1" size={24} />
-                                <span className="text-xs text-slate-400">Distribution</span>
+                    {/* Strength */}
+                    <Card className={clsx("p-4 md:p-6", `bg-${c_strength}-50 border-${c_strength}-200`)}>
+                        <div className="flex items-center gap-2 mb-4">
+                            <div className={clsx("p-2 bg-white rounded-lg shadow-sm", `text-${c_strength}-600`)}>
+                                <Dumbbell size={24} />
                             </div>
+                            <h4 className="font-bold text-slate-700">Strength</h4>
                         </div>
-                        <div className="flex justify-center gap-4 mt-4 flex-wrap">
-                            {activityDistribution.map(d => (
-                                <div key={d.name} className="flex items-center gap-2">
-                                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></div>
-                                    <span className="text-xs text-slate-600">{d.name}</span>
-                                </div>
-                            ))}
+                        <div className="flex justify-between items-end mb-2">
+                            <div>
+                                <span className="text-3xl font-bold text-slate-800">{physicalStats.strength}</span>
+                                <span className="text-sm text-slate-500 ml-1">/ {t_strength} workouts</span>
+                            </div>
+                            <span className={clsx("text-sm font-bold", `text-${c_strength}-600`)}>{Math.round((physicalStats.strength / (t_strength || 1)) * 100)}%</span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-2">
+                            <div className={clsx("h-2 rounded-full", `bg-${c_strength}-500`)} style={{ width: `${Math.min(100, (physicalStats.strength / (t_strength || 1)) * 100)}%` }}></div>
                         </div>
                     </Card>
                 </div>
             </div>
+
+
         </Layout>
     );
 }

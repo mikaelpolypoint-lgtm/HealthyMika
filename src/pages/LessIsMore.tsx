@@ -3,7 +3,7 @@ import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import { collection, query, onSnapshot, deleteDoc, orderBy, addDoc, doc, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Trash2, ShoppingBag, TrendingDown, Plus, Calendar, DollarSign, X, Tag, Edit2 } from 'lucide-react';
+import { Trash2, ShoppingBag, TrendingDown, Plus, Calendar, X, Tag, Edit2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { clsx } from 'clsx';
 

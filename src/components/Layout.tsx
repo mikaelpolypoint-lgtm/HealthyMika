@@ -5,6 +5,7 @@ import { twMerge } from 'tailwind-merge';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { useState } from 'react';
+import Logo from '../assets/MiKI_life_Logo.png';
 
 const navItems = [
     { icon: PenTool, label: 'Daily', path: '/' },
@@ -37,7 +38,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="flex min-h-screen bg-brand-background font-sans text-slate-900">
             {/* Mobile Header */}
             <header className="md:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-50 flex items-center justify-between px-4">
-                <h1 className="text-xl font-bold text-brand-primary">MiKI Life</h1>
+                <Link to="/" onClick={closeMenu}>
+                    <img src={Logo} alt="MiKI Life" className="h-8 w-auto object-contain" />
+                </Link>
                 <button onClick={toggleMenu} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg">
                     {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
                 </button>
@@ -57,9 +60,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
             )}>
                 <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                    <h1 className="text-2xl font-bold text-brand-primary">
-                        MiKI Life
-                    </h1>
+                    <Link to="/" onClick={closeMenu}>
+                        <img src={Logo} alt="MiKI Life" className="h-10 w-auto object-contain" />
+                    </Link>
                     <button onClick={closeMenu} className="md:hidden text-slate-400 hover:text-slate-600">
                         <X size={20} />
                     </button>

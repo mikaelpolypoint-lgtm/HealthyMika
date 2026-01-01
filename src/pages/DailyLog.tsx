@@ -4,7 +4,7 @@ import { Card, CardTitle } from "../components/Ui";
 import { collection, query, onSnapshot, doc, setDoc, Timestamp, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { format } from 'date-fns';
-import { Cross, Smartphone, UtensilsCrossed, Wine, Droplets, Bed, Activity, Pill, Droplet, Smile, BookOpen, Trash2, ListChecks, Plus, Sparkles, ChevronDown, CheckCircle2, ChevronLeft, ChevronRight, MessageSquare, AlertCircle, Save } from 'lucide-react';
+import { Cross, Smartphone, UtensilsCrossed, Wine, Droplets, Activity, BookOpen, ChevronDown, CheckCircle2, ChevronLeft, ChevronRight, MessageSquare, AlertCircle, Save } from 'lucide-react';
 import { clsx } from 'clsx';
 
 // --- Static Data: New Testament Books (for Bible Log) ---
@@ -37,6 +37,7 @@ interface DailyGoal {
     // Productivity & Focus
     screenTimeRating?: number; // 1-5 Stars 
     phoneFreeEvening?: boolean;
+    notes?: string;
 
     // Nutrition & Body
     hungryOnly: boolean;
@@ -51,12 +52,6 @@ interface DailyGoal {
 
     // Decluttering
     declutteredItem?: string; // Daily item removed
-}
-
-interface DailyTodo {
-    id: string; // generated via timestamp usually
-    text: string;
-    completed: boolean;
 }
 
 interface DailyFoodLog {
@@ -78,12 +73,6 @@ interface FellowshipLog {
     date: string;
     thoughts: string;
     chaptersRead: string[];
-}
-
-interface Book {
-    id: string;
-    title: string;
-    progress: number;
 }
 
 
@@ -128,11 +117,9 @@ export default function DailyLog() {
         chaptersRead: []
     });
 
-    // Daily Todos (Array of objects)
-    const [dailyTodos, setDailyTodos] = useState<DailyTodo[]>([]);
-    const [newTodo, setNewTodo] = useState('');
 
-    const [activeBooks, setActiveBooks] = useState<Book[]>([]); // Non-Bible Books
+
+
 
     // Bible Selector State
     const [selectedBook, setSelectedBook] = useState(NT_BOOKS[0]);
@@ -143,6 +130,7 @@ export default function DailyLog() {
 
 
     const [todaysWeight, setTodaysWeight] = useState<string>('');
+    const [todaysWeightTime, setTodaysWeightTime] = useState<string>('08:00');
 
     // --- Data Fetching ---
     useEffect(() => {
@@ -150,7 +138,7 @@ export default function DailyLog() {
         setDailyGoal({
             date: selectedDate,
             jesus: false, hungryOnly: false, noAlcohol: false, noSoda: false, phoneFreeEvening: false,
-            dailyMotto: '', sleepHours: 0, sleepQuality: 0, screenTimeRating: 0, bodyStatus: '', declutteredItem: '',
+            dailyMotto: '', sleepHours: 0, sleepQuality: 0, screenTimeRating: 0, bodyStatus: '', declutteredItem: '', notes: '',
             medications: { "Aspirin": 0, "Dafalgan": 0, "Neocitran": 0 }
         });
         setFoodLog({
@@ -170,8 +158,9 @@ export default function DailyLog() {
             thoughts: '',
             chaptersRead: []
         });
-        setDailyTodos([]);
+
         setTodaysWeight('');
+        setTodaysWeightTime('08:00');
 
         // 1. Daily Goals
         const unsubDaily = onSnapshot(doc(db, 'daily_goals', selectedDate), (docSnap) => {
@@ -213,24 +202,13 @@ export default function DailyLog() {
             setHistoryChapters(history);
         });
 
-        // 4. Daily Todos
-        const unsubTodos = onSnapshot(doc(db, 'daily_tasks', selectedDate), (doc) => {
-            if (doc.exists() && doc.data().tasks) {
-                setDailyTodos(doc.data().tasks);
-            } else {
-                setDailyTodos([]);
-            }
-        });
+
 
 
         // 5. Active Books (Global)
-        const qBooks = query(collection(db, 'books'));
-        const unsubBooks = onSnapshot(qBooks, (snap) => {
-            const allBooks = snap.docs.map(d => ({ id: d.id, ...d.data() } as Book));
-            setActiveBooks(allBooks.filter(b => b.progress < 100));
-        });
 
-        return () => { unsubDaily(); unsubFood(); unsubFellowship(); unsubHistory(); unsubTodos(); unsubBooks(); };
+
+        return () => { unsubDaily(); unsubFood(); unsubFellowship(); unsubHistory(); };
     }, [selectedDate]);
 
 
@@ -242,36 +220,9 @@ export default function DailyLog() {
         await setDoc(doc(db, 'daily_goals', selectedDate), newData, { merge: true });
     };
 
-    const updateMedication = (name: string, diff: number) => {
-        const currentCount = dailyGoal.medications?.[name] || 0;
-        const newCount = Math.max(0, currentCount + diff);
-        const newMeds = { ...(dailyGoal.medications || {}), [name]: newCount };
-        updateGoal({ medications: newMeds });
-    };
 
-    // Todo Handlers
-    const saveTodos = async (newTodos: DailyTodo[]) => {
-        setDailyTodos(newTodos);
-        await setDoc(doc(db, 'daily_tasks', selectedDate), { tasks: newTodos }, { merge: true });
-    };
 
-    const addTodo = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newTodo.trim()) return;
-        const task: DailyTodo = { id: Date.now().toString(), text: newTodo, completed: false };
-        saveTodos([...dailyTodos, task]);
-        setNewTodo('');
-    };
 
-    const toggleTodo = (id: string) => {
-        const updated = dailyTodos.map(t => t.id === id ? { ...t, completed: !t.completed } : t);
-        saveTodos(updated);
-    };
-
-    const deleteTodo = (id: string) => {
-        const updated = dailyTodos.filter(t => t.id !== id);
-        saveTodos(updated);
-    };
 
 
     const updateFood = async (updates: Partial<DailyFoodLog>) => {
@@ -316,9 +267,10 @@ export default function DailyLog() {
         try {
             await addDoc(collection(db, 'weight_logs'), {
                 weight: Number(todaysWeight),
-                date: Timestamp.fromDate(new Date(selectedDate + 'T08:00:00')),
+                date: Timestamp.fromDate(new Date(`${selectedDate}T${todaysWeightTime}:00`)),
             });
             setTodaysWeight('');
+            setTodaysWeightTime('08:00');
             alert('Weight saved!');
         } catch (e) {
             console.error(e);
@@ -326,10 +278,7 @@ export default function DailyLog() {
         setIsSaving(false);
     };
 
-    const updateBookProgress = async (id: string, newProgress: number) => {
-        const safeProgress = Math.min(100, Math.max(0, newProgress));
-        await setDoc(doc(db, 'books', id), { progress: safeProgress }, { merge: true });
-    };
+
 
 
 
@@ -385,80 +334,21 @@ export default function DailyLog() {
                         {dailyGoal.jesus && <CheckCircle2 size={24} className="text-amber-500 animate-in zoom-in" />}
                     </button>
 
-                    {/* Daily Motto */}
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
-                            <Sparkles size={14} className="text-indigo-500" /> Daily Motto
-                        </label>
-                        <input
-                            value={dailyGoal.dailyMotto || ''}
-                            onChange={(e) => updateGoal({ dailyMotto: e.target.value })}
-                            placeholder="Words to live by today..."
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium italic text-slate-700 outline-none focus:ring-2 ring-indigo-100"
-                        />
-                    </div>
 
-                    {/* Todo List */}
-                    <div>
-                        <label className="text-xs font-bold text-slate-400 uppercase mb-2 block flex items-center gap-1"><ListChecks size={14} /> Daily Tasks</label>
-                        <form onSubmit={addTodo} className="flex gap-2 mb-3">
-                            <input
-                                value={newTodo} onChange={e => setNewTodo(e.target.value)}
-                                placeholder="Add task..."
-                                className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none"
-                            />
-                            <button className="bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg px-3"><Plus size={16} /></button>
-                        </form>
-                        <div className="space-y-2">
-                            {dailyTodos.map(todo => (
-                                <div key={todo.id} className="flex items-center gap-2 group">
-                                    <button
-                                        onClick={() => toggleTodo(todo.id)}
-                                        className={clsx("w-5 h-5 rounded border flex items-center justify-center transition-colors",
-                                            todo.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 bg-white"
-                                        )}
-                                    >
-                                        {todo.completed && <Cross size={12} className="rotate-45" />}
-                                    </button>
-                                    <span className={clsx("flex-1 text-sm transition-all", todo.completed ? "text-slate-300 line-through" : "text-slate-700")}>{todo.text}</span>
-                                    <button onClick={() => deleteTodo(todo.id)} className="text-slate-200 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
-                                </div>
-                            ))}
-                            {dailyTodos.length === 0 && <p className="text-xs text-slate-300 italic">No tasks for today yet.</p>}
-                        </div>
-                    </div>
-
-                    {/* Sleep Tracker */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-xs font-bold text-slate-400 uppercase mb-2 block flex items-center gap-1"><Bed size={14} /> Sleep Hours</label>
-                            <div className="flex items-center gap-2">
-                                <button className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 font-bold hover:bg-slate-200" onClick={() => updateGoal({ sleepHours: Math.max(0, (dailyGoal.sleepHours || 0) - 0.5) })}>-</button>
-                                <span className="text-xl font-bold text-slate-700 w-12 text-center">{dailyGoal.sleepHours || 0}</span>
-                                <button className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 font-bold hover:bg-slate-200" onClick={() => updateGoal({ sleepHours: (dailyGoal.sleepHours || 0) + 0.5 })}>+</button>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-xs font-bold text-slate-400 uppercase mb-2 block flex items-center gap-1"><Smile size={14} /> Quality (1-5)</label>
-                            <div className="flex gap-1">
-                                {[1, 2, 3, 4, 5].map(star => (
-                                    <button
-                                        key={star}
-                                        onClick={() => updateGoal({ sleepQuality: star })}
-                                        className={clsx("w-6 h-8 rounded-md transition-all", (dailyGoal.sleepQuality || 0) >= star ? "bg-indigo-400 text-white" : "bg-slate-100 text-slate-300")}
-                                    >★</button>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
 
                     {/* Weight (Keep) */}
                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Weight (kg)</label>
-                        <div className="flex gap-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Weight (kg) & Time</label>
+                        <div className="flex gap-2">
+                            <input
+                                type="time"
+                                value={todaysWeightTime}
+                                onChange={e => setTodaysWeightTime(e.target.value)}
+                                className="bg-white border border-slate-200 rounded px-2 py-1 text-sm font-bold outline-none w-20"
+                            />
                             <input
                                 type="number" step="0.1" value={todaysWeight} onChange={e => setTodaysWeight(e.target.value)}
-                                className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-sm font-bold outline-none" placeholder="..."
+                                className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-sm font-bold outline-none" placeholder="kg"
                             />
                             <button onClick={saveWeight} disabled={isSaving} className="bg-brand-primary text-white p-1 rounded"><Save size={14} /></button>
                         </div>
@@ -498,39 +388,7 @@ export default function DailyLog() {
                         </div>
                     </div>
 
-                    {/* Eating Window (Added Back) */}
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-center justify-between gap-2">
-                        <div className="flex-1">
-                            <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Start (Fasting End)</span>
-                            <input type="time" value={foodLog.eatingStart || "12:00"} onChange={(e) => updateFood({ eatingStart: e.target.value })} className="w-full bg-white border border-slate-200 rounded p-1 text-xs font-bold outline-none" />
-                        </div>
-                        <span className="text-slate-300">→</span>
-                        <div className="flex-1">
-                            <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Stop (Fasting Start)</span>
-                            <input type="time" value={foodLog.eatingEnd || "20:00"} onChange={(e) => updateFood({ eatingEnd: e.target.value })} className="w-full bg-white border border-slate-200 rounded p-1 text-xs font-bold outline-none" />
-                        </div>
-                    </div>
 
-                    {/* Water & Coffee Counter */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="p-3 rounded-xl border border-sky-100 bg-sky-50 flex flex-col items-center gap-2">
-                            <span className="text-[10px] font-bold text-sky-600 uppercase flex items-center gap-1"><Droplet size={12} /> Water</span>
-                            <div className="flex items-center gap-3">
-                                <button onClick={() => updateFood({ water: Math.max(0, (foodLog.water || 0) - 1) })} className="w-6 h-6 bg-white rounded-full text-sky-500 shadow hover:bg-sky-100">-</button>
-                                <span className="text-xl font-bold text-sky-800">{foodLog.water || 0}</span>
-                                <button onClick={() => updateFood({ water: (foodLog.water || 0) + 1 })} className="w-6 h-6 bg-white rounded-full text-sky-500 shadow hover:bg-sky-100">+</button>
-                            </div>
-                        </div>
-
-                        <div className="p-3 rounded-xl border border-amber-100 bg-amber-50 flex flex-col items-center gap-2">
-                            <span className="text-[10px] font-bold text-amber-600 uppercase flex items-center gap-1">☕️ Coffee</span>
-                            <div className="flex items-center gap-3">
-                                <button onClick={() => updateFood({ coffees: Math.max(0, (foodLog.coffees || 0) - 1) })} className="w-6 h-6 bg-white rounded-full text-amber-500 shadow hover:bg-amber-100">-</button>
-                                <span className="text-xl font-bold text-amber-800">{foodLog.coffees || 0}</span>
-                                <button onClick={() => updateFood({ coffees: (foodLog.coffees || 0) + 1 })} className="w-6 h-6 bg-white rounded-full text-amber-500 shadow hover:bg-amber-100">+</button>
-                            </div>
-                        </div>
-                    </div>
 
                     {/* Habits Grid (Updated) */}
                     <div className="grid grid-cols-3 gap-2">
@@ -568,22 +426,7 @@ export default function DailyLog() {
                         </button>
                     </div>
 
-                    {/* Medications */}
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <label className="text-xs font-bold text-slate-400 uppercase mb-2 block flex items-center gap-1"><Pill size={14} /> Medicaments</label>
-                        <div className="space-y-3">
-                            {['Aspirin', 'Dafalgan', 'Neocitran'].map(med => (
-                                <div key={med} className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
-                                    <span className="text-xs font-bold text-slate-700">{med}</span>
-                                    <div className="flex items-center gap-2">
-                                        <button onClick={() => updateMedication(med, -1)} className="w-5 h-5 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-slate-500 font-bold">-</button>
-                                        <span className="text-sm font-bold text-slate-800 w-4 text-center">{dailyGoal.medications?.[med] || 0}</span>
-                                        <button onClick={() => updateMedication(med, 1)} className="w-5 h-5 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-slate-500 font-bold">+</button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+
 
                     {/* Body Status / Pain Log */}
                     <div>
@@ -649,35 +492,7 @@ export default function DailyLog() {
 
 
 
-                    {/* Reading (Non-Bible) */}
-                    <div>
-                        <label className="text-xs font-bold text-indigo-500 uppercase mb-2 block flex items-center justify-between">
-                            <span className="flex items-center gap-1"><BookOpen size={14} /> Reading (Non-Bible)</span>
-                            <span className="text-[10px] font-normal text-slate-400">Updates Global Progress</span>
-                        </label>
 
-                        {activeBooks.length === 0 ? (
-                            <p className="text-xs text-slate-400 italic bg-slate-50 p-2 rounded">No active books. Add one in Learning!</p>
-                        ) : (
-                            <div className="space-y-3">
-                                {activeBooks.map(book => (
-                                    <div key={book.id} className="bg-white border border-slate-100 rounded-lg p-2 shadow-sm">
-                                        <div className="flex justify-between items-center mb-1">
-                                            <span className="text-xs font-bold text-slate-700 truncate w-32">{book.title}</span>
-                                            <span className="text-[10px] font-bold text-indigo-600">{book.progress}%</span>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="range" min="0" max="100" value={book.progress}
-                                                onChange={e => updateBookProgress(book.id, Number(e.target.value))}
-                                                className="flex-1 accent-indigo-500 h-1 bg-slate-200 rounded appearance-none"
-                                            />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
 
                     {/* Screen Time Rating & Phone Free */}
                     <div className="grid grid-cols-2 gap-4">
@@ -701,6 +516,17 @@ export default function DailyLog() {
                         >
                             <Smartphone size={16} /> <span className="text-[10px] font-bold uppercase text-center">Phone Free Eve</span>
                         </button>
+                    </div>
+
+                    {/* Notes */}
+                    <div className="mt-4">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Daily Notes</label>
+                        <textarea
+                            value={dailyGoal.notes || ''}
+                            onChange={(e) => updateGoal({ notes: e.target.value })}
+                            placeholder="Screen time reflection or general notes..."
+                            className="w-full h-16 p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs focus:outline-none focus:ring-1 ring-indigo-300 resize-none"
+                        />
                     </div>
                 </Card>
 

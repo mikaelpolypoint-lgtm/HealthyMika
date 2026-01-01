@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings, Footprints, BookOpen, PenTool, Trophy, Heart, GraduationCap, Leaf, ListChecks } from 'lucide-react';
+import { LayoutDashboard, Scale, Bike, Dumbbell, Apple, Activity, LogOut, Menu, X, Settings, Footprints, BookOpen, PenTool, Trophy, Heart, GraduationCap, Leaf } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { signOut } from 'firebase/auth';
@@ -12,7 +12,7 @@ const navItems = [
     { icon: LayoutDashboard, label: 'Goals', path: '/dashboard' },
     { icon: GraduationCap, label: 'Life', path: '/life' },
     { icon: BookOpen, label: 'Books', path: '/books', indent: true },
-    { icon: ListChecks, label: 'Tasks', path: '/tasks', indent: true },
+
     { icon: Leaf, label: 'Less is More', path: '/less-is-more', indent: true },
     { icon: Heart, label: 'Health', path: '/health' },
     { icon: Scale, label: 'Weight', path: '/weight', indent: true },

@@ -19,7 +19,7 @@ import Bodyweight from './pages/Bodyweight';
 import DailyLog from './pages/DailyLog';
 
 import LessIsMore from './pages/LessIsMore';
-import Tasks from './pages/Tasks';
+
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<any>(null);
@@ -50,7 +50,7 @@ export default function App() {
                 <Route path="/weight" element={<ProtectedRoute><Weight /></ProtectedRoute>} />
                 <Route path="/books" element={<ProtectedRoute><Books /></ProtectedRoute>} />
                 <Route path="/less-is-more" element={<ProtectedRoute><LessIsMore /></ProtectedRoute>} />
-                <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+
                 <Route path="/biking" element={<ProtectedRoute><Biking /></ProtectedRoute>} />
                 <Route path="/running" element={<ProtectedRoute><Running /></ProtectedRoute>} />
                 <Route path="/strength" element={<ProtectedRoute><Strength /></ProtectedRoute>} />

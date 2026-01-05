@@ -26,28 +26,30 @@ const getTier = (i: number): BadgeTier => {
     return tiers[i] || 'diamond';
 };
 
-// --- Achievement Definitions ---
+// --- Milestone Constants (Exported for UI) ---
+export const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100, 365];
+export const DISTANCE_MILESTONES = [42, 100, 500, 1000, 2500, 5000, 10000];
+export const WORKOUT_MILESTONES = [10, 25, 50, 100, 250, 500, 1000];
+export const FOOD_MILESTONES = [10, 50, 100, 200, 365, 500, 1000];
+export const LEVEL_MILESTONES = [2, 5, 10, 20, 30, 50, 100];
+export const BW_MILESTONES = [100, 500, 1000, 5000, 10000, 25000, 50000];
+export const EARLY_MILESTONES = [5, 20, 50, 100, 200];
+export const NIGHT_MILESTONES = [5, 20, 50, 100, 200];
+export const WEEKEND_MILESTONES = [10, 50, 100, 250, 500];
+export const DISCIPLE_MILESTONES = [10, 50, 100, 260, 500];
 
-// 1. Streak (Days)
-const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100, 365];
-// 2. Total Distance (km)
-const DISTANCE_MILESTONES = [42, 100, 500, 1000, 2500, 5000, 10000];
-// 3. Strength Sessions (Count)
-const WORKOUT_MILESTONES = [10, 25, 50, 100, 250, 500, 1000];
-// 4. Clean Eating (Green Logs)
-const FOOD_MILESTONES = [10, 50, 100, 200, 365, 500, 1000];
-// 5. XP Level (Level 1, 5, etc)
-const LEVEL_MILESTONES = [2, 5, 10, 20, 30, 50, 100];
-// 6. Bodyweight Reps (Total)
-const BW_MILESTONES = [100, 500, 1000, 5000, 10000, 25000, 50000];
-// 7. Early Bird (Workouts 4am-9am)
-const EARLY_MILESTONES = [5, 20, 50, 100, 200];
-// 8. Night Owl (Workouts 8pm-2am)
-const NIGHT_MILESTONES = [5, 20, 50, 100, 200];
-// 9. Weekend Warrior (Sat/Sun logs)
-const WEEKEND_MILESTONES = [10, 50, 100, 250, 500];
-// 10. Disciple (Chapters Read)
-const DISCIPLE_MILESTONES = [10, 50, 100, 260, 500];
+export const BADGE_CONFIG = [
+    { id: 'streak', name: 'Consistency', label: 'Day Streak', icon: Flame, milestones: STREAK_MILESTONES },
+    { id: 'distance', name: 'Road Runner', label: 'km Total Distance', icon: Footprints, milestones: DISTANCE_MILESTONES },
+    { id: 'workouts', name: 'Iron Warrior', label: 'Workouts Completed', icon: Dumbbell, milestones: WORKOUT_MILESTONES },
+    { id: 'food', name: 'Clean Eater', label: 'Healthy Meals', icon: Salad, milestones: FOOD_MILESTONES },
+    { id: 'level', name: 'Legend', label: 'Reach Level', icon: Crown, milestones: LEVEL_MILESTONES, prefix: 'Level ' },
+    { id: 'bodyweight', name: 'Calisthenics', label: 'Total Reps', icon: Zap, milestones: BW_MILESTONES },
+    { id: 'early', name: 'Early Bird', label: 'Morning Workouts', icon: Sun, milestones: EARLY_MILESTONES },
+    { id: 'night', name: 'Night Owl', label: 'Late Night Workouts', icon: Moon, milestones: NIGHT_MILESTONES },
+    { id: 'weekend', name: 'Weekend Warrior', label: 'Weekend Activities', icon: Calendar, milestones: WEEKEND_MILESTONES },
+    { id: 'disciple', name: 'The Word', label: 'Chapters Read', icon: BookOpen, milestones: DISCIPLE_MILESTONES },
+];
 
 export function calculateBadges(stats: {
     streak: number;

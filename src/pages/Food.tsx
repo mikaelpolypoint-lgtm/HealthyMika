@@ -1,21 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import { collection, query, orderBy, onSnapshot, doc, setDoc, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { clsx } from 'clsx';
 import { format, subDays, eachDayOfInterval } from 'date-fns';
-import { Coffee, Wine, UtensilsCrossed, MessageSquare, Clock, Calendar as CalendarIcon, Droplets } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { Wine, UtensilsCrossed, MessageSquare, Calendar as CalendarIcon, Droplets } from 'lucide-react';
 
 // --- Types ---
 interface DailyFoodLog {
     date: string; // YYYY-MM-DD
     eatWhenHungry: boolean; // Yes/No
     caloriesColor: CalorieColor;
-    eatingStart: string; // HH:MM
-    eatingEnd: string; // HH:MM
-    coffees: number;
     noAlcohol: boolean; // Yes/No
     noSodas: boolean; // Yes/No
     comment: string;
@@ -41,9 +37,6 @@ export default function Food() {
         date: selectedDate,
         eatWhenHungry: true,
         caloriesColor: 'light-green',
-        eatingStart: '12:00',
-        eatingEnd: '20:00',
-        coffees: 0,
         noAlcohol: true,
         noSodas: true,
         comment: ''
@@ -79,35 +72,6 @@ export default function Food() {
         // Save to DB
         setDoc(doc(db, 'day_food_logs', validDate), merged, { merge: true });
     };
-
-    // Coffee Helpers
-    const adjustCoffee = (delta: number) => {
-        const newVal = Math.max(0, (currentLog.coffees || 0) + delta);
-        updateLog({ coffees: newVal });
-    };
-
-    // --- Visual Data Preparation ---
-    const last14Days = useMemo(() => {
-        return eachDayOfInterval({ start: subDays(new Date(), 13), end: new Date() }).map(d => {
-            const dateStr = format(d, 'yyyy-MM-dd');
-            return {
-                date: format(d, 'dd/MM'),
-                fullDate: dateStr,
-                coffees: logs[dateStr]?.coffees || 0,
-                color: logs[dateStr]?.caloriesColor || 'gray',
-                eatingDuration: logs[dateStr] ? calculateDuration(logs[dateStr].eatingStart, logs[dateStr].eatingEnd) : 0
-            };
-        });
-    }, [logs]);
-
-    function calculateDuration(start: string, end: string) {
-        if (!start || !end) return 0;
-        const [h1, m1] = start.split(':').map(Number);
-        const [h2, m2] = end.split(':').map(Number);
-        let diff = (h2 + m2 / 60) - (h1 + m1 / 60);
-        if (diff < 0) diff += 24; // Handle over midnight
-        return parseFloat(diff.toFixed(1));
-    }
 
     return (
         <Layout>
@@ -164,36 +128,7 @@ export default function Food() {
                                 <p className="text-right text-xs text-slate-400 mt-1 font-bold">{CALORIE_COLORS.find(c => c.value === currentLog.caloriesColor)?.label}</p>
                             </div>
 
-                            {/* 2. Eating Time */}
-                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                <label className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase mb-3">
-                                    <Clock size={16} /> Eating Window
-                                </label>
-                                <div className="flex items-center gap-4">
-                                    <div className="flex-1">
-                                        <span className="text-[10px] uppercase font-bold text-slate-400">Start</span>
-                                        <input
-                                            type="time"
-                                            value={currentLog.eatingStart}
-                                            onChange={(e) => updateLog({ eatingStart: e.target.value })}
-                                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-bold outline-none focus:border-brand-primary"
-                                        />
-                                    </div>
-                                    <span className="text-slate-300 mt-4">→</span>
-                                    <div className="flex-1">
-                                        <span className="text-[10px] uppercase font-bold text-slate-400">End</span>
-                                        <input
-                                            type="time"
-                                            value={currentLog.eatingEnd}
-                                            onChange={(e) => updateLog({ eatingEnd: e.target.value })}
-                                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm font-bold outline-none focus:border-brand-primary"
-                                        />
-                                    </div>
-                                </div>
-                                <p className="text-right text-xs text-brand-primary mt-2 font-bold">
-                                    Total: {calculateDuration(currentLog.eatingStart, currentLog.eatingEnd)} hrs
-                                </p>
-                            </div>
+                            {/* 2. Eating Time - REMOVED */}
 
                             {/* 3. Toggles Grid */}
                             <div className="grid grid-cols-2 gap-4">
@@ -235,16 +170,6 @@ export default function Food() {
                                         No Alcohol? {currentLog.noAlcohol ? "Yes" : "No"}
                                     </span>
                                 </button>
-
-                                {/* Coffee Counter */}
-                                <div className="p-3 rounded-xl border border-amber-100 bg-amber-50 flex flex-col items-center justify-between">
-                                    <span className="text-xs font-bold text-amber-700 uppercase flex items-center gap-1"><Coffee size={14} /> Coffees</span>
-                                    <div className="flex items-center gap-3 mt-2">
-                                        <button onClick={() => adjustCoffee(-1)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full shadow text-amber-600 hover:bg-amber-100 font-bold">-</button>
-                                        <span className="text-xl font-bold text-amber-800">{currentLog.coffees}</span>
-                                        <button onClick={() => adjustCoffee(1)} className="w-8 h-8 flex items-center justify-center bg-white rounded-full shadow text-amber-600 hover:bg-amber-100 font-bold">+</button>
-                                    </div>
-                                </div>
                             </div>
 
                             {/* 4. Comment */}
@@ -297,26 +222,9 @@ export default function Food() {
                         </div>
                     </Card>
 
-                    {/* 2. Coffee & Eating Time Chart */}
-                    <Card className="h-80">
-                        <CardTitle>Coffee & Fasting Trends</CardTitle>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={last14Days} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
-                                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                                <YAxis yAxisId="coffee" orientation="left" stroke="#d97706" tick={{ fontSize: 10 }} width={30} label={{ value: 'Cups', angle: -90, position: 'insideLeft', fontSize: 10, fill: '#d97706' }} />
-                                <YAxis yAxisId="duration" orientation="right" stroke="#6366f1" tick={{ fontSize: 10 }} width={30} domain={[0, 16]} label={{ value: 'Eating Hours', angle: 90, position: 'insideRight', fontSize: 10, fill: '#6366f1' }} />
-                                <Tooltip
-                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar yAxisId="coffee" dataKey="coffees" name="Coffees" fill="#fbbf24" radius={[4, 4, 0, 0]} barSize={20} />
-                                <Bar yAxisId="duration" dataKey="eatingDuration" name="Eating Window (h)" fill="#818cf8" radius={[4, 4, 0, 0]} barSize={20} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </Card>
-
                     {/* 3. Streaks / Stats */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        {/* No Soda Streak (Simple calculation: simplified to count in last 30 days for robustness vs strict streak) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        {/* No Soda Streak */}
                         <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-center">
                             <h4 className="text-xs font-bold text-blue-400 uppercase">Soda Free</h4>
                             <p className="text-2xl font-bold text-blue-700 mt-1">
@@ -340,19 +248,10 @@ export default function Food() {
                             </p>
                             <p className="text-[10px] text-emerald-400 mt-1">Total Recorded</p>
                         </div>
-
-                        <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 text-center">
-                            <h4 className="text-xs font-bold text-amber-400 uppercase">Total Coffee</h4>
-                            <p className="text-2xl font-bold text-amber-700 mt-1">
-                                {Object.values(logs).reduce((a, b) => a + (b.coffees || 0), 0)} <span className="text-sm font-normal opacity-70">cups</span>
-                            </p>
-                            <p className="text-[10px] text-amber-400 mt-1">Total Recorded</p>
-                        </div>
-
                     </div>
                 </div>
 
             </div>
-        </Layout>
+        </Layout >
     );
 }

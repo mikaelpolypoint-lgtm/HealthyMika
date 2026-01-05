@@ -55,6 +55,7 @@ export default function App() {
                 <Route path="/running" element={<ProtectedRoute><Running /></ProtectedRoute>} />
                 <Route path="/strength" element={<ProtectedRoute><Strength /></ProtectedRoute>} />
                 <Route path="/bodyweight" element={<ProtectedRoute><Bodyweight /></ProtectedRoute>} />
+                <Route path="/bodyweight" element={<ProtectedRoute><Bodyweight /></ProtectedRoute>} />
                 <Route path="/food" element={<ProtectedRoute><Food /></ProtectedRoute>} />
                 <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             </Routes>

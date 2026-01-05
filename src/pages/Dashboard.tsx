@@ -9,7 +9,7 @@ import {
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { clsx } from 'clsx';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, differenceInDays, differenceInCalendarDays } from 'date-fns';
 
 // --- Types ---
 type TimeFilter = 'week' | 'month' | 'year';
@@ -131,7 +131,7 @@ export default function Dashboard() {
 
     const dateRange = useMemo(() => {
         if (timeFilter === 'week') {
-            return { start: startOfWeek(today, { weekStartsOn: 0 }), end: endOfWeek(today, { weekStartsOn: 0 }) };
+            return { start: startOfWeek(today, { weekStartsOn: 1 }), end: endOfWeek(today, { weekStartsOn: 1 }) }; // Switch to Monday start for better logic usually
         } else if (timeFilter === 'month') {
             return { start: startOfMonth(today), end: endOfMonth(today) };
         } else {
@@ -139,6 +139,40 @@ export default function Dashboard() {
             return { start: START_OF_YEAR, end: new Date('2026-12-31') }; // Approx end
         }
     }, [timeFilter]);
+
+    // Projection Helpers
+    const projectionStats = useMemo(() => {
+        const totalDays = differenceInDays(dateRange.end, dateRange.start) + 1;
+
+        // Days elapsed: Ensure we don't go beyond today or total days
+        let daysElapsed = differenceInCalendarDays(today, dateRange.start) + 1;
+        // If looking at a past period, elapsed is total. If future, 0.
+        if (today > dateRange.end) daysElapsed = totalDays;
+        if (today < dateRange.start) daysElapsed = 0;
+
+        // Use a minimum of 1 day to avoid Infinity, but also concept of "current day pace"
+        const effectiveElapsed = Math.max(1, daysElapsed); // Even on day 1 morning, we project based on what's done so far? 
+        // Maybe better: if day 1, projection is volatile. But user asked for it. 
+        // Better logic: If elapsed < 1 (start of day 1), maybe treat as 0.5? Let's stick to simple integers for now effectively.
+
+        return { totalDays, daysElapsed: effectiveElapsed };
+    }, [dateRange]);
+
+    const getProjection = (current: number) => {
+        if (projectionStats.daysElapsed === 0) return 0;
+        const rate = current / projectionStats.daysElapsed;
+        return Math.round(rate * projectionStats.totalDays);
+    };
+
+    // Helper to render projection text
+    const RenderProjection = ({ current, unit }: { current: number, unit?: string }) => {
+        const proj = getProjection(current);
+        return (
+            <span className="text-[10px] font-bold text-slate-400 uppercase">
+                Trending to: <span className="text-slate-600">{proj}{unit ? ` ${unit}` : ''}</span>
+            </span>
+        );
+    };
 
     // 1. Habits Progress
     const habitsStats = useMemo(() => {
@@ -336,7 +370,10 @@ export default function Dashboard() {
                                 <span className="text-3xl font-bold text-slate-800">{physicalStats.declutter}</span>
                                 <span className="text-sm text-slate-500 ml-1">/ {t_declutter} items</span>
                             </div>
-                            <span className={clsx("text-sm font-bold", `text-${c_declutter}-600`)}>{Math.round((physicalStats.declutter / (t_declutter || 1)) * 100)}%</span>
+                            <div className="text-right">
+                                <span className={clsx("text-sm font-bold block", `text-${c_declutter}-600`)}>{Math.round((physicalStats.declutter / (t_declutter || 1)) * 100)}%</span>
+                                <RenderProjection current={physicalStats.declutter} unit="items" />
+                            </div>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2">
                             <div className={clsx("h-2 rounded-full transition-all duration-500", `bg-${c_declutter}-600`)} style={{ width: `${Math.min(100, (physicalStats.declutter / (t_declutter || 1)) * 100)}%` }}></div>
@@ -358,7 +395,10 @@ export default function Dashboard() {
                                 <span className="text-3xl font-bold text-slate-800">{physicalStats.books}</span>
                                 <span className="text-sm text-slate-500 ml-1">/ {t_books} books</span>
                             </div>
-                            <span className={clsx("text-sm font-bold", `text-${c_books}-600`)}>{Math.round((physicalStats.books / Math.max(1, t_books)) * 100)}%</span>
+                            <div className="text-right">
+                                <span className={clsx("text-sm font-bold block", `text-${c_books}-600`)}>{Math.round((physicalStats.books / Math.max(1, t_books)) * 100)}%</span>
+                                <RenderProjection current={physicalStats.books} unit="books" />
+                            </div>
                         </div>
                         <div className={clsx("w-full rounded-full h-2", `bg-${c_books}-200/50`)}>
                             <div className={clsx("h-2 rounded-full transition-all duration-500", `bg-${c_books}-500`)} style={{ width: `${Math.min(100, (physicalStats.books / Math.max(1, t_books)) * 100)}%` }}></div>
@@ -380,9 +420,12 @@ export default function Dashboard() {
                                 <span className="text-3xl font-bold text-slate-800">{ntStats.chapters}</span>
                                 <span className="text-sm text-slate-500 ml-1">/ {ntStats.target} ch</span>
                             </div>
-                            <span className={clsx("text-sm font-bold", ntStats.chapters >= ntStats.target ? "text-emerald-500" : `text-${c_nt}-500`)}>
-                                {Math.round((ntStats.chapters / Math.max(1, ntStats.target)) * 100)}%
-                            </span>
+                            <div className="text-right">
+                                <span className={clsx("text-sm font-bold block", ntStats.chapters >= ntStats.target ? "text-emerald-500" : `text-${c_nt}-500`)}>
+                                    {Math.round((ntStats.chapters / Math.max(1, ntStats.target)) * 100)}%
+                                </span>
+                                <RenderProjection current={ntStats.chapters} unit="ch" />
+                            </div>
                         </div>
                         <div className={clsx("w-full rounded-full h-2", `bg-${c_nt}-200/50`)}>
                             <div className={clsx("h-2 rounded-full transition-all duration-500", `bg-${c_nt}-500`)} style={{ width: `${Math.min(100, (ntStats.chapters / Math.max(1, ntStats.target)) * 100)}%` }}></div>
@@ -426,6 +469,7 @@ export default function Dashboard() {
                                 {habitsStats.jesus.val} / {habitsStats.jesus.target} days
                             </span>
                         </div>
+                        <div className="mb-1 text-right"><RenderProjection current={habitsStats.jesus.val} unit="days" /></div>
                         <div className={clsx("w-full rounded-full h-2.5", `bg-${c_jesus}-100`)}>
                             <div className={clsx("h-2.5 rounded-full", `bg-${c_jesus}-500`)} style={{ width: `${Math.min(100, (habitsStats.jesus.val / (habitsStats.jesus.target || 1)) * 100)}%` }}></div>
                         </div>
@@ -445,6 +489,7 @@ export default function Dashboard() {
                                 {habitsStats.hungry.val} / {habitsStats.hungry.target} days
                             </span>
                         </div>
+                        <div className="mb-1 text-right"><RenderProjection current={habitsStats.hungry.val} unit="days" /></div>
                         <div className={clsx("w-full rounded-full h-2.5", `bg-${c_hungry}-100`)}>
                             <div className={clsx("h-2.5 rounded-full", `bg-${c_hungry}-500`)} style={{ width: `${Math.min(100, (habitsStats.hungry.val / (habitsStats.hungry.target || 1)) * 100)}%` }}></div>
                         </div>
@@ -464,6 +509,7 @@ export default function Dashboard() {
                                 {habitsStats.clean.val} / {habitsStats.clean.target} days
                             </span>
                         </div>
+                        <div className="mb-1 text-right"><RenderProjection current={habitsStats.clean.val} unit="days" /></div>
                         <div className={clsx("w-full rounded-full h-2.5", `bg-${c_clean}-100`)}>
                             <div className={clsx("h-2.5 rounded-full", `bg-${c_clean}-500`)} style={{ width: `${Math.min(100, (habitsStats.clean.val / (habitsStats.clean.target || 1)) * 100)}%` }}></div>
                         </div>
@@ -483,6 +529,7 @@ export default function Dashboard() {
                                 {habitsStats.phone.val} / {habitsStats.phone.target} days
                             </span>
                         </div>
+                        <div className="mb-1 text-right"><RenderProjection current={habitsStats.phone.val} unit="days" /></div>
                         <div className={clsx("w-full rounded-full h-2.5", `bg-${c_phone}-100`)}>
                             <div className={clsx("h-2.5 rounded-full", `bg-${c_phone}-500`)} style={{ width: `${Math.min(100, (habitsStats.phone.val / (habitsStats.phone.target || 1)) * 100)}%` }}></div>
                         </div>
@@ -504,7 +551,10 @@ export default function Dashboard() {
                                 <span className="text-3xl font-bold text-slate-800">{physicalStats.run.toFixed(1)}</span>
                                 <span className="text-sm text-slate-500 ml-1">/ {t_run} km</span>
                             </div>
-                            <span className={clsx("text-sm font-bold", `text-${c_run}-600`)}>{Math.round((physicalStats.run / (t_run || 1)) * 100)}%</span>
+                            <div className="text-right">
+                                <span className={clsx("text-sm font-bold block", `text-${c_run}-600`)}>{Math.round((physicalStats.run / (t_run || 1)) * 100)}%</span>
+                                <RenderProjection current={physicalStats.run} unit="km" />
+                            </div>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2">
                             <div className={clsx("h-2 rounded-full", `bg-${c_run}-500`)} style={{ width: `${Math.min(100, (physicalStats.run / (t_run || 1)) * 100)}%` }}></div>
@@ -524,7 +574,10 @@ export default function Dashboard() {
                                 <span className="text-3xl font-bold text-slate-800">{physicalStats.bike.toFixed(1)}</span>
                                 <span className="text-sm text-slate-500 ml-1">/ {t_bike} km</span>
                             </div>
-                            <span className={clsx("text-sm font-bold", `text-${c_bike}-600`)}>{Math.round((physicalStats.bike / (t_bike || 1)) * 100)}%</span>
+                            <div className="text-right">
+                                <span className={clsx("text-sm font-bold block", `text-${c_bike}-600`)}>{Math.round((physicalStats.bike / (t_bike || 1)) * 100)}%</span>
+                                <RenderProjection current={physicalStats.bike} unit="km" />
+                            </div>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2">
                             <div className={clsx("h-2 rounded-full", `bg-${c_bike}-500`)} style={{ width: `${Math.min(100, (physicalStats.bike / (t_bike || 1)) * 100)}%` }}></div>
@@ -544,7 +597,10 @@ export default function Dashboard() {
                                 <span className="text-3xl font-bold text-slate-800">{physicalStats.strength}</span>
                                 <span className="text-sm text-slate-500 ml-1">/ {t_strength} workouts</span>
                             </div>
-                            <span className={clsx("text-sm font-bold", `text-${c_strength}-600`)}>{Math.round((physicalStats.strength / (t_strength || 1)) * 100)}%</span>
+                            <div className="text-right">
+                                <span className={clsx("text-sm font-bold block", `text-${c_strength}-600`)}>{Math.round((physicalStats.strength / (t_strength || 1)) * 100)}%</span>
+                                <RenderProjection current={physicalStats.strength} />
+                            </div>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2">
                             <div className={clsx("h-2 rounded-full", `bg-${c_strength}-500`)} style={{ width: `${Math.min(100, (physicalStats.strength / (t_strength || 1)) * 100)}%` }}></div>

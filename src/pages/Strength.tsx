@@ -1,11 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
 import { collection, addDoc, query, orderBy, onSnapshot, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Dumbbell, Save, History, Pencil, Trash2 } from 'lucide-react';
+import { Dumbbell, History, Pencil, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
-import { clsx } from 'clsx';
 
 interface Workout {
     id: string;
@@ -33,9 +32,6 @@ interface PlannedWorkout {
 
 export default function Training() {
     const [workouts, setWorkouts] = useState<Workout[]>([]);
-    const [exercise, setExercise] = useState('');
-    const [weight, setWeight] = useState('');
-    const [reps, setReps] = useState('');
     const [loading, setLoading] = useState(false);
 
     // Finnlo Autark 1500 Exercises (Selected)
@@ -77,13 +73,6 @@ export default function Training() {
         }
     ];
 
-    const selectExercise = (ex: typeof EXERCISE_CATALOG[0]) => {
-        setExercise(ex.name);
-        // Scroll to manual form if open, else maybe open it
-        const form = document.getElementById('manual-log-form');
-        if (form) form.scrollIntoView({ behavior: 'smooth' });
-    };
-
     // --- Program Logic ---
     const [plan, setPlan] = useState<PlannedWorkout[]>([]);
     const [nextWorkout, setNextWorkout] = useState<PlannedWorkout | null>(null);
@@ -123,7 +112,6 @@ export default function Training() {
             // Progression: 4 week cycle. 
             // W1: 2x8-10, W2: 2x10-12, W3: 2x12-14, W4: 2x14-15 (Fail? Ok).
             // W5: +5kg, Reset to 2x8.
-
             // Simpler Linear: Increase reps target every week (3 sessions).
             // Cycle: 8, 10, 12, 14 reps. Then Weight pump.
 
@@ -152,9 +140,6 @@ export default function Training() {
                     });
 
                     // Add doc
-                    // Note: Use addDoc or setDoc with explicit ID. 
-                    // Let's use setDoc with an ordered ID to make sorting easy/reliable if needed, or just let Firestore handle it and sort by 'order'.
-                    // We'll create promises.
                     batchPromises.push(
                         addDoc(collection(db, 'training_plan'), {
                             order: orderCounter,
@@ -180,8 +165,7 @@ export default function Training() {
                 }
             }
 
-            await Promise.all(batchPromises); // Might hit limits if 150 items. Firestore handles parallel requests well usually.
-            // If it fails, we might need chunks. 156 requests is okay-ish.
+            await Promise.all(batchPromises);
         } catch (e) {
             console.error(e);
             alert('Error generating plan');
@@ -194,24 +178,15 @@ export default function Training() {
     const [executing, setExecuting] = useState(false);
     const [executionData, setExecutionData] = useState<any[]>([]); // Copy of nextWorkout.exercises but mutable
 
-    const startExecution = () => {
-        if (!nextWorkout) return;
-        setExecutionData(nextWorkout.exercises.map(e => ({ ...e, actualWeight: e.weight, actualReps: e.reps })));
-        setExecuting(true);
-    };
-
     const finishWorkout = async () => {
         if (!nextWorkout) return;
         setLoading(true);
         try {
             // 1. Log all exercises to 'workouts' collection
             const logPromises = executionData.map(e => {
-                // We need to log X sets. The user input 'actualReps'/'actualWeight' applies to ALL sets for simplicity?
-                // Or we iterate sets.
-                // Request said "5-7 sets overall". 
-                // e.sets is 1 or 2.
+                const setsToRun = e.actualSets || e.sets;
                 const logs = [];
-                for (let i = 0; i < e.sets; i++) {
+                for (let i = 0; i < setsToRun; i++) {
                     logs.push(addDoc(collection(db, 'workouts'), {
                         exercise: e.name,
                         weight: Number(e.actualWeight),
@@ -263,80 +238,106 @@ export default function Training() {
         return () => unsubscribe();
     }, []);
 
-    // PR Logic: Calculate max weight per exercise
-    const prs = useMemo(() => {
-        const records: Record<string, number> = {};
-        workouts.forEach(w => {
-            const name = w.exercise.trim(); // Normalize
-            if (!records[name] || w.weight > records[name]) {
-                records[name] = w.weight;
-            }
-        });
-        return records;
-    }, [workouts]);
 
-    const [newPr, setNewPr] = useState<{ exercise: string, weight: number } | null>(null);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!exercise || !weight || !reps) return;
 
-        // Check for PR
-        const currentPr = prs[exercise.trim()] || 0;
-        if (Number(weight) > currentPr) {
-            setNewPr({ exercise: exercise, weight: Number(weight) });
-            setTimeout(() => setNewPr(null), 5000); // Hide after 5s
-        }
 
+
+
+
+
+    // --- Session Editing Logic ---
+    const [sessionEditData, setSessionEditData] = useState<Workout[]>([]);
+    const [deletedSessionIds, setDeletedSessionIds] = useState<string[]>([]);
+
+    const startSessionEditing = (dateKey: string, logs: Workout[]) => {
+        setEditingId(dateKey); // Using dateKey as ID for session mode
+        setSessionEditData(logs.map(l => ({ ...l }))); // Deep copy
+        setDeletedSessionIds([]);
+        setEditForm({ ...editForm, dateStr: dateKey.replace(' ', 'T') });
+    };
+
+    const saveSessionEdit = async () => {
         setLoading(true);
         try {
-            await addDoc(collection(db, 'workouts'), {
-                exercise,
-                weight: Number(weight),
-                reps: Number(reps),
-                date: Timestamp.now()
+            const dateObj = new Date(editForm.dateStr);
+            const ts = Timestamp.fromDate(dateObj);
+
+            // 1. Updates
+            const updatePromises = sessionEditData.map(log => {
+                if (log.id) {
+                    return updateDoc(doc(db, 'workouts', log.id), {
+                        exercise: log.exercise,
+                        weight: Number(log.weight),
+                        reps: Number(log.reps),
+                        date: ts // Apply new date to all
+                    });
+                }
+                return Promise.resolve();
             });
-            setExercise('');
-            setWeight('');
-            setReps('');
-        } catch (error) {
-            console.error("Error adding document: ", error);
-            alert("Error saving workout");
+
+            // 2. Deletions
+            const deletePromises = deletedSessionIds.map(id => deleteDoc(doc(db, 'workouts', id)));
+
+            await Promise.all([...updatePromises, ...deletePromises]);
+            setEditingId(null);
+            setSessionEditData([]);
+        } catch (e) {
+            console.error(e);
+            alert('Failed to save session');
         } finally {
             setLoading(false);
         }
     };
 
-    const startEditing = (log: Workout) => {
-        setEditingId(log.id);
-        setEditForm({
-            exercise: log.exercise,
-            weight: log.weight,
-            reps: log.reps,
-            dateStr: format(log.date.toDate(), "yyyy-MM-dd'T'HH:mm")
-        });
-    };
-
-    const saveEdit = async () => {
-        if (!editingId) return;
+    const deleteSession = async (logs: Workout[]) => {
+        if (!confirm(`Delete all ${logs.length} sets in this session?`)) return;
+        setLoading(true);
         try {
-            await updateDoc(doc(db, 'workouts', editingId), {
-                exercise: editForm.exercise,
-                weight: Number(editForm.weight),
-                reps: Number(editForm.reps),
-                date: Timestamp.fromDate(new Date(editForm.dateStr))
-            });
-            setEditingId(null);
+            await Promise.all(logs.map(l => deleteDoc(doc(db, 'workouts', l.id))));
         } catch (e) {
             console.error(e);
-            alert('Failed to update');
+            alert('Failed to delete session');
+        } finally {
+            setLoading(false);
         }
     };
 
-    const deleteLog = async (id: string) => {
-        if (confirm('Delete this set?')) {
-            await deleteDoc(doc(db, 'workouts', id));
-        }
+    // --- Smart Start Logic ---
+    // Override startExecution to use history
+    const startExecution = () => {
+        if (!nextWorkout) return;
+
+        // Find most recent log for each exercise to determine defaults
+        // Logic: For each exercise in plan, find the last workout with same name.
+        const smartExercises = nextWorkout.exercises.map(ex => {
+            // Filter workouts for this exercise, sort desc
+            const history = workouts
+                .filter(w => w.exercise.toLowerCase() === ex.name.toLowerCase()) // simple match
+                .sort((a, b) => b.date.toMillis() - a.date.toMillis());
+
+            const lastLog = history[0];
+
+            let recommendedWeight = ex.weight;
+            let recommendedReps = ex.reps;
+
+            if (lastLog) {
+                // "Take the last logged workout session and add (+1) to the reps"
+                recommendedWeight = lastLog.weight;
+                recommendedReps = lastLog.reps + 1;
+            }
+
+            return {
+                ...ex,
+                actualWeight: recommendedWeight,
+                actualReps: recommendedReps,
+                // Ensure sets is editable in UI, defaulting to plan sets
+                actualSets: ex.sets
+            };
+        });
+
+        setExecutionData(smartExercises);
+        setExecuting(true);
     };
 
     return (
@@ -346,18 +347,7 @@ export default function Training() {
                 <p className="text-slate-500">Track your progress on the <span className="text-rose-600 font-medium">Hammer Autark 1500</span>.</p>
             </header>
 
-            {/* PR Celebration Banner */}
-            {newPr && (
-                <div className="mb-6 bg-yellow-400 text-yellow-900 p-4 rounded-xl shadow-lg animate-in slide-in-from-top flex items-center justify-between border-b-4 border-yellow-600">
-                    <div className="flex items-center gap-3">
-                        <span className="text-3xl">🏆</span>
-                        <div>
-                            <h3 className="font-bold text-lg">NEW RECORD!</h3>
-                            <p>You just crushed your {newPr.exercise} PR with <span className="font-bold">{newPr.weight}kg</span>!</p>
-                        </div>
-                    </div>
-                </div>
-            )}
+
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="flex flex-col gap-8">
@@ -392,19 +382,30 @@ export default function Training() {
                                 </div>
 
                                 <div className="space-y-3 mb-6">
-                                    {nextWorkout.exercises.map((ex, idx) => (
-                                        <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
-                                            <div>
-                                                <p className="font-bold text-slate-700">{ex.name}</p>
-                                                <p className="text-xs text-slate-400">{ex.sets} set{ex.sets > 1 ? 's' : ''}</p>
+                                    {nextWorkout.exercises.map((ex, idx) => {
+                                        // Calculate smart target for preview
+                                        const history = workouts
+                                            .filter(w => w.exercise.toLowerCase() === ex.name.toLowerCase())
+                                            .sort((a, b) => b.date.toMillis() - a.date.toMillis());
+                                        const lastLog = history[0];
+                                        const displayWeight = lastLog ? lastLog.weight : ex.weight;
+                                        const displayReps = lastLog ? lastLog.reps + 1 : ex.reps;
+
+                                        return (
+                                            <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                                                <div>
+                                                    <p className="font-bold text-slate-700">{ex.name}</p>
+                                                    <p className="text-xs text-slate-400">{ex.sets} set{ex.sets > 1 ? 's' : ''}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="font-bold text-slate-800">{displayWeight}kg</span>
+                                                    <span className="text-xs text-slate-400 mx-2">x</span>
+                                                    <span className="font-bold text-rose-600">{displayReps}</span>
+                                                    {lastLog && <span className="text-[10px] text-emerald-500 block font-bold">+1 from last</span>}
+                                                </div>
                                             </div>
-                                            <div className="text-right">
-                                                <span className="font-bold text-slate-800">{ex.weight}kg</span>
-                                                <span className="text-xs text-slate-400 mx-2">x</span>
-                                                <span className="font-bold text-slate-800">{ex.reps}</span>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
 
                                 <button
@@ -426,17 +427,29 @@ export default function Training() {
                                         <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                                             <div className="flex justify-between mb-2">
                                                 <span className="font-bold text-slate-700">{ex.name}</span>
-                                                <span className="text-xs text-slate-400 font-bold uppercase">{ex.sets} Set{ex.sets > 1 ? 's' : ''}</span>
                                             </div>
-                                            <div className="grid grid-cols-2 gap-3">
+                                            <div className="grid grid-cols-3 gap-2">
                                                 <div className="flex flex-col">
-                                                    <label className="text-[10px] text-slate-400 uppercase font-bold mb-1">Weight (kg)</label>
+                                                    <label className="text-[10px] text-slate-400 uppercase font-bold mb-1">Sets</label>
+                                                    <input
+                                                        type="number"
+                                                        value={ex.actualSets || ex.sets}
+                                                        onChange={(e) => {
+                                                            const newData = [...executionData];
+                                                            newData[idx].actualSets = Number(e.target.value);
+                                                            setExecutionData(newData);
+                                                        }}
+                                                        className="w-full p-2 rounded border border-slate-200 text-sm font-bold"
+                                                    />
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <label className="text-[10px] text-slate-400 uppercase font-bold mb-1">Weight</label>
                                                     <input
                                                         type="number"
                                                         value={ex.actualWeight}
                                                         onChange={(e) => {
                                                             const newData = [...executionData];
-                                                            newData[idx].actualWeight = e.target.value;
+                                                            newData[idx].actualWeight = Number(e.target.value);
                                                             setExecutionData(newData);
                                                         }}
                                                         className="w-full p-2 rounded border border-slate-200 text-sm font-bold"
@@ -449,7 +462,7 @@ export default function Training() {
                                                         value={ex.actualReps}
                                                         onChange={(e) => {
                                                             const newData = [...executionData];
-                                                            newData[idx].actualReps = e.target.value;
+                                                            newData[idx].actualReps = Number(e.target.value);
                                                             setExecutionData(newData);
                                                         }}
                                                         className="w-full p-2 rounded border border-slate-200 text-sm font-bold"
@@ -479,151 +492,177 @@ export default function Training() {
                         )}
                     </Card>
 
-                    <Card className="h-fit order-2 lg:order-2">
-                        <CardTitle>Manual Log</CardTitle>
-                        <form id="manual-log-form" onSubmit={handleSubmit} className="space-y-4 mt-4">
-                            <div className="relative">
-                                <Dumbbell className="absolute left-3 top-3 text-slate-400" size={18} />
-                                <input
-                                    type="text"
-                                    placeholder="Exercise (e.g. Lat Pulldown)"
-                                    value={exercise}
-                                    onChange={(e) => setExercise(e.target.value)}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 text-slate-800 focus:ring-2 focus:ring-rose-500 outline-none"
-                                />
-                            </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <input
-                                    type="number"
-                                    placeholder="Weight (kg)"
-                                    value={weight}
-                                    onChange={(e) => setWeight(e.target.value)}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-slate-800 focus:ring-2 focus:ring-rose-500 outline-none"
-                                />
-                                <input
-                                    type="number"
-                                    placeholder="Reps"
-                                    value={reps}
-                                    onChange={(e) => setReps(e.target.value)}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-slate-800 focus:ring-2 focus:ring-rose-500 outline-none"
-                                />
-                            </div>
 
-                            <button
-                                type="submit"
-                                disabled={loading}
-                                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-4 rounded-xl transition shadow-lg disabled:opacity-50"
-                            >
-                                <Save size={18} />
-                                {loading ? 'Saving...' : 'Log Single Set'}
-                            </button>
-                        </form>
-                    </Card>
 
-                    {/* Hall of Fame (PRs) */}
-                    <Card className="h-fit bg-slate-900 text-white order-1 lg:order-2">
-                        <CardTitle>
-                            <div className="text-yellow-400 flex items-center gap-2">
-                                <span>🏆</span> Hall of Fame
-                            </div>
-                        </CardTitle>
-                        <p className="text-slate-400 text-xs mb-4">Your all-time heaviest lifts.</p>
-
-                        <div className="space-y-3">
-                            {Object.entries(prs)
-                                .sort((a: [string, number], b: [string, number]) => b[1] - a[1])
-                                .slice(0, 5) // Top 5
-                                .map(([name, weight]) => (
-                                    <div key={name} className="flex justify-between items-center p-2 bg-slate-800 rounded border border-slate-700">
-                                        <span className="font-medium text-slate-200">{name}</span>
-                                        <span className="font-bold text-yellow-400 md:text-lg">{weight} <span className="text-xs text-slate-500 font-normal">kg</span></span>
-                                    </div>
-                                ))}
-                            {Object.keys(prs).length === 0 && (
-                                <p className="text-slate-600 text-center py-4">No records yet.</p>
-                            )}
-                        </div>
-                    </Card>
                 </div>
 
                 {/* Main Content Column */}
                 <div className="lg:col-span-2 flex flex-col gap-8">
-                    {/* Exercise Catalog */}
-                    <Card className="h-fit">
-                        <CardTitle>Exercise Catalog</CardTitle>
-                        <p className="text-sm text-slate-500 mb-4">Select an exercise to log.</p>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {EXERCISE_CATALOG.map(ex => (
-                                <button
-                                    key={ex.id}
-                                    onClick={() => selectExercise(ex)}
-                                    className="flex items-start gap-3 p-3 rounded-xl border border-slate-100 hover:border-brand-primary/30 hover:shadow-md transition-all text-left bg-white group"
-                                >
-                                    <div className={clsx("w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 text-lg font-bold", ex.color)}>
-                                        {ex.name.substring(0, 2)}
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-slate-800 group-hover:text-brand-primary transition-colors">{ex.name}</h4>
-                                        <p className="text-xs text-slate-400 mt-1 line-clamp-2">{ex.desc}</p>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </Card>
 
                     {/* History List */}
                     <Card>
-                        <CardTitle>Recent Sets</CardTitle>
-                        <div className="space-y-3 mt-4">
-                            {workouts.map((workout) => {
-                                if (editingId === workout.id) {
-                                    return (
-                                        <div key={workout.id} className="bg-rose-50/50 p-4 rounded-xl space-y-3 border border-rose-200">
-                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                                <input type="datetime-local" value={editForm.dateStr} onChange={e => setEditForm({ ...editForm, dateStr: e.target.value })} className="p-2 border rounded text-sm" />
-                                                <input type="text" value={editForm.exercise} onChange={e => setEditForm({ ...editForm, exercise: e.target.value })} className="p-2 border rounded text-sm" placeholder="Exercise" />
-                                                <input type="number" value={editForm.weight} onChange={e => setEditForm({ ...editForm, weight: Number(e.target.value) })} className="p-2 border rounded text-sm" placeholder="Kg" />
-                                                <input type="number" value={editForm.reps} onChange={e => setEditForm({ ...editForm, reps: Number(e.target.value) })} className="p-2 border rounded text-sm" placeholder="Reps" />
+                        <CardTitle>History (Sessions)</CardTitle>
+                        <div className="space-y-6 mt-4">
+                            {Object.entries(
+                                workouts.reduce((groups, log) => {
+                                    // Group by Date+Time (within 1 min margin or strict string match if logs created nicely)
+                                    // Using strict string match for now as Timestamp.now() in batch usually shares second.
+                                    // Actually, let's round to minute to be safe.
+                                    const dateKey = format(log.date.toDate(), "yyyy-MM-dd HH:mm");
+                                    if (!groups[dateKey]) groups[dateKey] = [];
+                                    groups[dateKey].push(log);
+                                    return groups;
+                                }, {} as Record<string, Workout[]>)
+                            ).sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime()) // Sort by date desc
+                                .map(([dateKey, sessionLogs]) => {
+                                    const isEditingSession = editingId === dateKey;
+
+                                    if (isEditingSession) {
+                                        return (
+                                            <div key={dateKey} className="bg-rose-50/50 p-4 rounded-xl space-y-4 border border-rose-200">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <h4 className="font-bold text-rose-700">Editing Session</h4>
+                                                    <input
+                                                        type="datetime-local"
+                                                        value={editForm.dateStr}
+                                                        onChange={e => setEditForm(prev => ({ ...prev, dateStr: e.target.value }))}
+                                                        className="p-1 border rounded text-xs"
+                                                    />
+                                                </div>
+
+                                                {/* We need a specialized edit form for sessions because 'editForm' currently is single-flat. 
+                                                    Let's modify the component state to handle session editing or just map inputs here directly to a temp state?
+                                                    Actually, let's use a local state or abuse 'editForm' to hold array? 
+                                                    Ideally, we refactor 'editForm'. For now, I will use a clever hack or add a new state for 'sessionEditForm'.
+                                                    
+                                                    Since I cannot easily add new state variables inside this map, I must have added them to the main component body previously.
+                                                    WAIT. I need to add 'sessionEditData' state to the component first. 
+                                                    I'll assume I will add it. I'll write the JSX assuming 'sessionEditData' exists.
+                                                */}
+                                                <div className="space-y-2">
+                                                    {sessionEditData.map((log, idx) => (
+                                                        <div key={log.id || idx} className="grid grid-cols-12 gap-2 items-center">
+                                                            <div className="col-span-5">
+                                                                <input
+                                                                    value={log.exercise}
+                                                                    onChange={e => {
+                                                                        const n = [...sessionEditData];
+                                                                        n[idx].exercise = e.target.value;
+                                                                        setSessionEditData(n);
+                                                                    }}
+                                                                    className="w-full p-2 border rounded text-xs font-bold"
+                                                                    placeholder="Ex"
+                                                                />
+                                                            </div>
+                                                            <div className="col-span-3">
+                                                                <input
+                                                                    type="number"
+                                                                    value={log.weight}
+                                                                    onChange={e => {
+                                                                        const n = [...sessionEditData];
+                                                                        n[idx].weight = Number(e.target.value);
+                                                                        setSessionEditData(n);
+                                                                    }}
+                                                                    className="w-full p-2 border rounded text-xs"
+                                                                    placeholder="kg"
+                                                                />
+                                                            </div>
+                                                            <div className="col-span-3">
+                                                                <input
+                                                                    type="number"
+                                                                    value={log.reps}
+                                                                    onChange={e => {
+                                                                        const n = [...sessionEditData];
+                                                                        n[idx].reps = Number(e.target.value);
+                                                                        setSessionEditData(n);
+                                                                    }}
+                                                                    className="w-full p-2 border rounded text-xs"
+                                                                    placeholder="reps"
+                                                                />
+                                                            </div>
+                                                            <div className="col-span-1 flex justify-center">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (confirm('Delete this line?')) {
+                                                                            // Mark for deletion or remove from array? 
+                                                                            // If it has ID, we must delete from DB. If not, just remove from UI.
+                                                                            // Let's just remove from UI and handle deletion on Save (diffing) or simple "delete immediately" 
+                                                                            // Simpler: Delete immediately from DB? No, that's dangerous in "Edit" mode.
+                                                                            // Let's just filter it out.
+                                                                            const n = sessionEditData.filter((_, i) => i !== idx);
+                                                                            setSessionEditData(n);
+                                                                            // Also we should keep track of deleted IDs to remove them from DB on save.
+                                                                            if (log.id) setDeletedSessionIds(prev => [...prev, log.id]);
+                                                                        }
+                                                                    }}
+                                                                    className="text-red-400 hover:text-red-600"
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                <div className="flex justify-end gap-2 mt-4 border-t border-rose-200 pt-2">
+                                                    <button onClick={() => { setEditingId(null); setSessionEditData([]); }} className="px-3 py-1 text-slate-500 hover:bg-slate-200 rounded text-sm font-bold">Cancel</button>
+                                                    <button onClick={saveSessionEdit} className="px-3 py-1 bg-rose-600 text-white rounded text-sm font-bold shadow">Save Changes</button>
+                                                </div>
                                             </div>
-                                            <div className="flex justify-end gap-2">
-                                                <button onClick={() => setEditingId(null)} className="px-3 py-1 text-slate-500 hover:bg-slate-200 rounded text-sm">Cancel</button>
-                                                <button onClick={saveEdit} className="px-3 py-1 bg-rose-600 text-white rounded text-sm">Save</button>
+                                        );
+                                    }
+
+                                    return (
+                                        <div key={dateKey} className="group bg-white p-5 rounded-xl border border-slate-200 hover:shadow-md transition-all relative">
+                                            <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="p-1.5 bg-rose-100 rounded-lg text-rose-600">
+                                                        <History size={16} />
+                                                    </div>
+                                                    <span className="font-bold text-slate-700 capitalize">
+                                                        {format(new Date(dateKey), 'EEEE, MMM do')}
+                                                    </span>
+                                                    <span className="text-xs text-slate-400 font-mono">
+                                                        {format(new Date(dateKey), 'HH:mm')}
+                                                    </span>
+                                                </div>
+                                                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => startSessionEditing(dateKey, sessionLogs)}
+                                                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition"
+                                                        title="Edit Session"
+                                                    >
+                                                        <Pencil size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => deleteSession(sessionLogs)}
+                                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                                                        title="Delete Session"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Exercises Grid */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                                                {sessionLogs.map(log => (
+                                                    <div key={log.id} className="flex justify-between items-center text-sm border-b border-slate-50 py-1 last:border-0">
+                                                        <span className="font-medium text-slate-600 truncate mr-2">{log.exercise}</span>
+                                                        <div className="flex items-center gap-1 font-mono">
+                                                            <span className="font-bold text-slate-800">{log.weight}kg</span>
+                                                            <span className="text-slate-300">x</span>
+                                                            <span className="font-bold text-rose-600">{log.reps}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
                                     );
-                                }
-
-                                return (
-                                    <div key={workout.id} className="group bg-white p-4 rounded-xl flex justify-between items-center border border-slate-200 hover:shadow-md transition-shadow">
-                                        <div className="flex items-center gap-4">
-                                            <div className="p-2 bg-rose-50 rounded-lg text-rose-600">
-                                                <History size={20} />
-                                            </div>
-                                            <div>
-                                                <p className="font-bold text-lg text-slate-800">{workout.exercise}</p>
-                                                <p className="text-slate-500 text-sm">
-                                                    {format(workout.date.toDate(), 'MMM d, h:mm a')}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-6">
-                                            <div className="text-right">
-                                                <span className="text-2xl font-bold text-rose-500">{workout.weight}</span>
-                                                <span className="text-slate-400 ml-1 text-sm">kg</span>
-                                                <span className="mx-2 text-slate-300">x</span>
-                                                <span className="text-2xl font-bold text-slate-800">{workout.reps}</span>
-                                                <span className="text-slate-400 ml-1 text-sm">reps</span>
-                                            </div>
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => startEditing(workout)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded"><Pencil size={16} /></button>
-                                                <button onClick={() => deleteLog(workout.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={16} /></button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                                })
+                            }
                             {workouts.length === 0 && (
                                 <p className="text-slate-400 text-center py-8">No workouts logged yet. Start training!</p>
                             )}

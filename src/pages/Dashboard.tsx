@@ -3,13 +3,13 @@ import { Layout } from "../components/Layout";
 import { Card } from "../components/Ui";
 
 import {
-    Bike, Dumbbell, Scale,
+    Bike, Dumbbell, Scale, ChevronLeft, ChevronRight,
     Crown, UtensilsCrossed, Wine, Smartphone, Footprints, Trash2, BookOpen
 } from "lucide-react";
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { clsx } from 'clsx';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, differenceInDays, differenceInCalendarDays } from 'date-fns';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, differenceInDays, differenceInCalendarDays, addWeeks, subWeeks, addMonths, subMonths, format, getISOWeek } from 'date-fns';
 
 // --- Types ---
 type TimeFilter = 'week' | 'month' | 'year';
@@ -55,6 +55,7 @@ const DEFAULT_TARGETS = {
 
 export default function Dashboard() {
     const [timeFilter, setTimeFilter] = useState<TimeFilter>('week');
+    const [currentDate, setCurrentDate] = useState(new Date());
 
     // --- Data State ---
     const [goalsConfig, setGoalsConfig] = useState<any[]>([]); // Dynamic Goals from Settings
@@ -131,14 +132,36 @@ export default function Dashboard() {
 
     const dateRange = useMemo(() => {
         if (timeFilter === 'week') {
-            return { start: startOfWeek(today, { weekStartsOn: 1 }), end: endOfWeek(today, { weekStartsOn: 1 }) }; // Switch to Monday start for better logic usually
+            return {
+                start: startOfWeek(currentDate, { weekStartsOn: 1 }),
+                end: endOfWeek(currentDate, { weekStartsOn: 1 })
+            };
         } else if (timeFilter === 'month') {
-            return { start: startOfMonth(today), end: endOfMonth(today) };
+            return {
+                start: startOfMonth(currentDate),
+                end: endOfMonth(currentDate)
+            };
         } else {
             // Year - use custom start date
             return { start: START_OF_YEAR, end: new Date('2026-12-31') }; // Approx end
         }
-    }, [timeFilter]);
+    }, [timeFilter, currentDate]);
+
+    const handlePrev = () => {
+        if (timeFilter === 'week') setCurrentDate(d => subWeeks(d, 1));
+        if (timeFilter === 'month') setCurrentDate(d => subMonths(d, 1));
+    };
+
+    const handleNext = () => {
+        if (timeFilter === 'week') setCurrentDate(d => addWeeks(d, 1));
+        if (timeFilter === 'month') setCurrentDate(d => addMonths(d, 1));
+    };
+
+    const periodLabel = useMemo(() => {
+        if (timeFilter === 'week') return `Week ${getISOWeek(currentDate)} (${format(dateRange.start, 'MMM d')} - ${format(dateRange.end, 'MMM d')})`;
+        if (timeFilter === 'month') return format(currentDate, 'MMMM yyyy');
+        return '2026 Season';
+    }, [timeFilter, currentDate, dateRange]);
 
     // Projection Helpers
     const projectionStats = useMemo(() => {
@@ -275,36 +298,58 @@ export default function Dashboard() {
     const t_bike = getTarget('bike', timeFilter);
     const t_strength = getTarget('strength', timeFilter);
 
-    // Special Weight Calculation
+    // Special Weight Calculation (Linear Interpolation from Start Date)
     const t_weight = useMemo(() => {
         const wGoal = goalsConfig.find(g => g.slug === 'weight');
         if (!wGoal) return getTarget('weight', 'fixed');
 
-        const current = physicalStats.currentWeight;
-        const target = wGoal.yearlyTarget;
+        // 1. Define Goal Parameters
+        const GOAL_START_DATE = new Date('2026-01-01'); // Fixed Start Date as requested
+        const targetWeight = wGoal.yearlyTarget;
 
-        if (timeFilter === 'year') return target; // Year view shows final goal
+        // 2. Find Start Weight (Weight on or closest to Jan 1st)
+        // We need a baseline. Let's find the log closest to Jan 1st 2026.
+        // weightLogs is sorted by date DESC.
+        const sortedLogs = [...weightLogs].sort((a, b) => a.date.seconds - b.date.seconds); // Sort ASC
+        // Find first log ON or AFTER Jan 1st
+        const startLog = sortedLogs.find(l => {
+            const d = l.date.toDate();
+            return d >= GOAL_START_DATE;
+        }) || sortedLogs[0]; // Fallback to earliest available
 
-        const endDate = wGoal.endDate ? new Date(wGoal.endDate) : new Date();
-        const now = new Date();
-        const diffTime = endDate.getTime() - now.getTime();
-        const weeksLeft = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 7)));
+        const startWeight = startLog?.weight || 90; // Fallback if no logs
 
-        const amountToLose = Math.max(0, current - target);
-        // Rate needed to hit goal on time
-        const weeklyRate = amountToLose / weeksLeft;
+        // 3. Define End Date
+        const goalEndDate = wGoal.endDate ? new Date(wGoal.endDate) : new Date('2026-04-30'); // Default to end of April if not set
 
-        if (timeFilter === 'week') {
-            // Target for end of this week
-            return Number((current - weeklyRate).toFixed(1));
-        }
-        if (timeFilter === 'month') {
-            // Target for end of this month (approx 4.3 weeks)
-            return Number((current - (weeklyRate * 4.345)).toFixed(1));
-        }
+        // 4. Calculate Slope (Daily Loss)
+        const totalDays = differenceInCalendarDays(goalEndDate, GOAL_START_DATE);
+        const totalLoss = startWeight - targetWeight;
+        const dailyLoss = totalLoss / Math.max(1, totalDays);
 
-        return target;
-    }, [goalsConfig, timeFilter, physicalStats.currentWeight]);
+        // 5. Determine Target for Current View (End of the selected period)
+        let targetDateForView = dateRange.end;
+
+        // If viewing Year, usually we show the FINAL goal? 
+        // Or if we want to see "Where should I be TODAY (or end of this year)", 
+        // logic implies showing the curve value. 
+        // However, usually "Yearly Goal" implies the final destination (85).
+        if (timeFilter === 'year') return targetWeight;
+
+        // Constraint: Don't project past the goal end date (Maintenance phase)
+        if (targetDateForView > goalEndDate) targetDateForView = goalEndDate;
+
+        // Calculate days passed since start
+        const daysPassed = differenceInCalendarDays(targetDateForView, GOAL_START_DATE);
+
+        // If checking a date BEFORE the start, expectation is start weight
+        if (daysPassed < 0) return startWeight;
+
+        // Linear Calculation
+        const calculatedTarget = startWeight - (dailyLoss * daysPassed);
+
+        return Number(calculatedTarget.toFixed(1));
+    }, [goalsConfig, timeFilter, weightLogs, dateRange]);
 
 
     // Dynamic Colors
@@ -337,20 +382,32 @@ export default function Dashboard() {
                     <p className="text-slate-500">Track your progress and stay consistent.</p>
                 </div>
 
-                {/* Time Filter Controls */}
-                <div className="flex bg-slate-100 p-1 rounded-xl self-start md:self-auto">
-                    {(['week', 'month', 'year'] as TimeFilter[]).map((filter) => (
-                        <button
-                            key={filter}
-                            onClick={() => setTimeFilter(filter)}
-                            className={clsx(
-                                "px-4 py-2 rounded-lg text-sm font-bold capitalize transition-all",
-                                timeFilter === filter ? "bg-white text-brand-primary shadow-sm" : "text-slate-500 hover:text-slate-700"
-                            )}
-                        >
-                            {filter}
-                        </button>
-                    ))}
+                {/* Time Filter Controls & Navigation */}
+                <div className="flex flex-col md:flex-row items-center gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+                    {/* Filter Tabs */}
+                    <div className="flex bg-slate-200/50 p-1 rounded-xl">
+                        {(['week', 'month', 'year'] as TimeFilter[]).map((filter) => (
+                            <button
+                                key={filter}
+                                onClick={() => { setTimeFilter(filter); setCurrentDate(new Date()); }}
+                                className={clsx(
+                                    "px-4 py-2 rounded-lg text-sm font-bold capitalize transition-all",
+                                    timeFilter === filter ? "bg-white text-brand-primary shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                )}
+                            >
+                                {filter}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Date Navigation (Only for Week/Month) */}
+                    {timeFilter !== 'year' && (
+                        <div className="flex items-center gap-2 px-2">
+                            <button onClick={handlePrev} className="p-2 hover:bg-white rounded-lg text-slate-500 transition-all"><ChevronLeft size={20} /></button>
+                            <span className="text-sm font-bold text-slate-700 min-w-[140px] text-center">{periodLabel}</span>
+                            <button onClick={handleNext} className="p-2 hover:bg-white rounded-lg text-slate-500 transition-all"><ChevronRight size={20} /></button>
+                        </div>
+                    )}
                 </div>
             </header>
 

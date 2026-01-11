@@ -35,9 +35,7 @@ interface DailyGoal {
     sleepQuality?: number; // 1-5
 
     // Productivity & Focus
-    screenTimeRating?: number; // 1-5 Stars 
     phoneFreeEvening?: boolean;
-    notes?: string;
 
     // Nutrition & Body
     hungryOnly: boolean;
@@ -94,7 +92,7 @@ export default function DailyLog() {
     const [dailyGoal, setDailyGoal] = useState<DailyGoal>({
         date: selectedDate,
         jesus: false, hungryOnly: false, noAlcohol: false, noSoda: false, phoneFreeEvening: false,
-        dailyMotto: '', sleepHours: 0, sleepQuality: 0, screenTimeRating: 0, bodyStatus: '', declutteredItem: '',
+        dailyMotto: '', sleepHours: 0, sleepQuality: 0, bodyStatus: '', declutteredItem: '',
         medications: { "Aspirin": 0, "Dafalgan": 0, "Neocitran": 0 }
     });
 
@@ -130,7 +128,7 @@ export default function DailyLog() {
 
 
     const [todaysWeight, setTodaysWeight] = useState<string>('');
-    const [todaysWeightTime, setTodaysWeightTime] = useState<string>('08:00');
+
 
     // --- Data Fetching ---
     useEffect(() => {
@@ -138,7 +136,7 @@ export default function DailyLog() {
         setDailyGoal({
             date: selectedDate,
             jesus: false, hungryOnly: false, noAlcohol: false, noSoda: false, phoneFreeEvening: false,
-            dailyMotto: '', sleepHours: 0, sleepQuality: 0, screenTimeRating: 0, bodyStatus: '', declutteredItem: '', notes: '',
+            dailyMotto: '', sleepHours: 0, sleepQuality: 0, bodyStatus: '', declutteredItem: '',
             medications: { "Aspirin": 0, "Dafalgan": 0, "Neocitran": 0 }
         });
         setFoodLog({
@@ -160,7 +158,7 @@ export default function DailyLog() {
         });
 
         setTodaysWeight('');
-        setTodaysWeightTime('08:00');
+        setTodaysWeight('');
 
         // 1. Daily Goals
         const unsubDaily = onSnapshot(doc(db, 'daily_goals', selectedDate), (docSnap) => {
@@ -265,12 +263,13 @@ export default function DailyLog() {
         if (!todaysWeight) return;
         setIsSaving(true);
         try {
+            const now = new Date();
+            const timeString = format(now, 'HH:mm:ss');
             await addDoc(collection(db, 'weight_logs'), {
                 weight: Number(todaysWeight),
-                date: Timestamp.fromDate(new Date(`${selectedDate}T${todaysWeightTime}:00`)),
+                date: Timestamp.fromDate(new Date(`${selectedDate}T${timeString}`)),
             });
             setTodaysWeight('');
-            setTodaysWeightTime('08:00');
             alert('Weight saved!');
         } catch (e) {
             console.error(e);
@@ -336,16 +335,10 @@ export default function DailyLog() {
 
 
 
-                    {/* Weight (Keep) */}
+                    {/* Weight (Keep - Simplified) */}
                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Weight (kg) & Time</label>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Weight (kg)</label>
                         <div className="flex gap-2">
-                            <input
-                                type="time"
-                                value={todaysWeightTime}
-                                onChange={e => setTodaysWeightTime(e.target.value)}
-                                className="bg-white border border-slate-200 rounded px-2 py-1 text-sm font-bold outline-none w-20"
-                            />
                             <input
                                 type="number" step="0.1" value={todaysWeight} onChange={e => setTodaysWeight(e.target.value)}
                                 className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-sm font-bold outline-none" placeholder="kg"
@@ -394,12 +387,12 @@ export default function DailyLog() {
                     <div className="grid grid-cols-3 gap-2">
                         {/* No Alcohol */}
                         <button
-                            onClick={() => updateGoal({ noAlcohol: !dailyGoal.noAlcohol })}
+                            onClick={() => updateFood({ noAlcohol: !foodLog.noAlcohol })}
                             className={clsx("p-2 rounded-xl border flex flex-col items-center gap-1 transition-all text-center",
-                                dailyGoal.noAlcohol ? "bg-rose-50 border-rose-200" : "bg-white border-slate-200 opacity-60"
+                                foodLog.noAlcohol ? "bg-rose-50 border-rose-200" : "bg-white border-slate-200 opacity-60"
                             )}
                         >
-                            <Wine size={16} className={dailyGoal.noAlcohol ? "text-rose-600" : "text-slate-400"} />
+                            <Wine size={16} className={foodLog.noAlcohol ? "text-rose-600" : "text-slate-400"} />
                             <span className="text-[9px] font-bold uppercase text-slate-500">No Alcohol</span>
                         </button>
 
@@ -494,39 +487,16 @@ export default function DailyLog() {
 
 
 
-                    {/* Screen Time Rating & Phone Free */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Screen Rating</label>
-                            <div className="flex gap-0.5">
-                                {[1, 2, 3, 4, 5].map(star => (
-                                    <button
-                                        key={star}
-                                        onClick={() => updateGoal({ screenTimeRating: star })}
-                                        className={clsx("w-5 h-7 rounded transition-all", (dailyGoal.screenTimeRating || 0) >= star ? "bg-indigo-400 text-white" : "bg-slate-100 text-slate-300")}
-                                    >★</button>
-                                ))}
-                            </div>
-                        </div>
+                    {/* Phone Free Evening Only (Moved) */}
+                    <div className="mt-4">
                         <button
                             onClick={() => updateGoal({ phoneFreeEvening: !dailyGoal.phoneFreeEvening })}
-                            className={clsx("px-2 rounded-lg border-2 flex flex-col items-center justify-center gap-1 transition-all",
-                                dailyGoal.phoneFreeEvening ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-slate-100 text-slate-400"
+                            className={clsx("w-full py-3 rounded-lg border-2 flex flex-row items-center justify-center gap-2 transition-all",
+                                dailyGoal.phoneFreeEvening ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-slate-100 text-slate-400 hover:border-indigo-100"
                             )}
                         >
-                            <Smartphone size={16} /> <span className="text-[10px] font-bold uppercase text-center">Phone Free Eve</span>
+                            <Smartphone size={18} /> <span className="text-xs font-bold uppercase">Phone Free Evening</span>
                         </button>
-                    </div>
-
-                    {/* Notes */}
-                    <div className="mt-4">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Daily Notes</label>
-                        <textarea
-                            value={dailyGoal.notes || ''}
-                            onChange={(e) => updateGoal({ notes: e.target.value })}
-                            placeholder="Screen time reflection or general notes..."
-                            className="w-full h-16 p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs focus:outline-none focus:ring-1 ring-indigo-300 resize-none"
-                        />
                     </div>
                 </Card>
 

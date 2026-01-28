@@ -17,6 +17,7 @@ import Life from './pages/Life';
 import Settings from './pages/Settings';
 import Bodyweight from './pages/Bodyweight';
 import DailyLog from './pages/DailyLog';
+import Budget from './pages/Budget';
 
 import LessIsMore from './pages/LessIsMore';
 
@@ -47,6 +48,7 @@ export default function App() {
                 <Route path="/sport" element={<ProtectedRoute><Sport /></ProtectedRoute>} />
                 <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
                 <Route path="/life" element={<ProtectedRoute><Life /></ProtectedRoute>} />
+                <Route path="/budget" element={<ProtectedRoute><Budget /></ProtectedRoute>} />
                 <Route path="/weight" element={<ProtectedRoute><Weight /></ProtectedRoute>} />
                 <Route path="/books" element={<ProtectedRoute><Books /></ProtectedRoute>} />
                 <Route path="/less-is-more" element={<ProtectedRoute><LessIsMore /></ProtectedRoute>} />

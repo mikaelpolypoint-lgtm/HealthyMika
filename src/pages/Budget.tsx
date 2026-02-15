@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle, Button } from "../components/Ui";
-import { Wallet, Plus, Trash2, PiggyBank, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
+import { Wallet, Plus, Trash2, PiggyBank, ChevronLeft, ChevronRight, Settings, Filter, Pencil, Check, X, PieChart } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -25,7 +26,8 @@ interface BudgetItem {
     lastOccurringMonth?: number; // 0-11, undefined = no end
     oneTimeMonth?: number; // 0-11, used if !isRecurring
 
-    monthlyAmounts: Record<number, number>; // 0 (Jan) -> 11 (Dec)
+    startYear?: number; // Year the item was created/starts
+    monthlyAmounts: Record<string, number>; // "YYYY-M" -> value (or legacy "0"-"11" for 2026)
 }
 
 interface SavingsAccount {
@@ -38,14 +40,22 @@ interface SavingsAccount {
 // --- Constants ---
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const CURRENT_YEAR = new Date().getFullYear();
+const BASE_YEAR = 2026;
+const YEARS = [2026, 2027, 2028, 2029, 2030];
 
 export default function Budget() {
     // --- State: View & Date ---
     const [viewMode, setViewMode] = useState<'monthly' | 'yearly'>('monthly');
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-    const [selectedYear] = useState(CURRENT_YEAR); // setSelectedYear unused for now
+    const [selectedYear, setSelectedYear] = useState(BASE_YEAR);
     const [showCategorySettings, setShowCategorySettings] = useState(false);
+    const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+    const [showFilters, setShowFilters] = useState(false);
+    const navigate = useNavigate();
+
+    // --- State: Editing ---
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editForm, setEditForm] = useState({ name: '', category: '' });
 
     // --- State: Categories ---
     const [expenseCategories, setExpenseCategories] = useState<string[]>([]);
@@ -54,7 +64,6 @@ export default function Budget() {
 
     // --- State: Data ---
     const [incomes, setIncomes] = useState<BudgetItem[]>([]);
-
 
     const [expenses, setExpenses] = useState<BudgetItem[]>([]);
 
@@ -115,36 +124,140 @@ export default function Budget() {
         };
     }, []);
 
+    // --- Computed Data & Filtering ---
+
+    const allCategories = useMemo(() => Array.from(new Set([...incomeCategories, ...expenseCategories])), [incomeCategories, expenseCategories]);
+
+    const filteredIncomes = useMemo(() => {
+        if (selectedCategories.length === 0) return incomes;
+        return incomes.filter(i => selectedCategories.includes(i.category));
+    }, [incomes, selectedCategories]);
+
+    const filteredExpenses = useMemo(() => {
+        if (selectedCategories.length === 0) return expenses;
+        return expenses.filter(e => selectedCategories.includes(e.category));
+    }, [expenses, selectedCategories]);
+
     // --- Helpers ---
 
-    const getMonthlyAmount = (item: BudgetItem, month: number) => item.monthlyAmounts[month] || 0;
+    const getMonthlyAmount = (item: BudgetItem, year: number, month: number) => {
+        // 1. Explicit override (supports year-month key)
+        const specificKey = `${year}-${month}`;
+        if (item.monthlyAmounts[specificKey] !== undefined) return item.monthlyAmounts[specificKey];
 
-    const updateMonthlyAmount = async (id: string, type: 'income' | 'expense', month: number, value: number) => {
+        // 2. Legacy 2026 (supports index key "0"-"11" mapping to 2026)
+        // Note: Firestore keys are strings. Accessing with number relies on JS coercion, 
+        // but for TS 'Record<string, number>' we should cast keys.
+        if (year === 2026 && item.monthlyAmounts[String(month)] !== undefined) return item.monthlyAmounts[String(month)];
+
+        // 3. Recurrence Logic
+        if (item.isRecurring) {
+            // Check Start Date
+            const itemStartYear = item.startYear || BASE_YEAR;
+            if (year < itemStartYear) return 0;
+
+            // Check End Date
+            // Ensure lastOccurringMonth is a valid number before comparing
+            if (typeof item.lastOccurringMonth === 'number') {
+                // If we are past 2026, it stops (assuming legacy constraint)
+                if (year > BASE_YEAR) return 0;
+                // If in 2026, check month
+                if (year === BASE_YEAR && month > item.lastOccurringMonth) return 0;
+            }
+
+            // Frequency check relative to Jan 2026 (or Item Start)
+            // We anchor to Jan 2026 for phase alignment across global timeline
+            const absMonthDiff = (year - BASE_YEAR) * 12 + month;
+
+            // Should not happen if year < BASE_YEAR, but strict check
+            if (absMonthDiff < 0) return 0;
+
+            let step = 1;
+            if (item.recurrenceFrequency === 'quarterly') step = 3;
+            else if (item.recurrenceFrequency === 'semiannual') step = 6;
+            else if (item.recurrenceFrequency === 'yearly') step = 12;
+
+            if (absMonthDiff % step === 0) {
+                return item.defaultAmount;
+            }
+        }
+
+        return 0;
+    };
+
+    const updateMonthlyAmount = async (id: string, type: 'income' | 'expense', year: number, month: number, value: number) => {
         const collectionName = type === 'income' ? 'budget_incomes' : 'budget_expenses';
         try {
             await updateDoc(doc(db, collectionName, id), {
-                [`monthlyAmounts.${month}`]: value
+                [`monthlyAmounts.${year}-${month}`]: value
             });
         } catch (e) {
             console.error("Error updating monthly amount", e);
         }
     };
 
+    // --- Edit Item Details (Name/Category) ---
+    const startEditing = (item: BudgetItem) => {
+        setEditingId(item.id);
+        setEditForm({ name: item.name, category: item.category });
+    };
+
+    const cancelEditing = () => {
+        setEditingId(null);
+        setEditForm({ name: '', category: '' });
+    };
+
+    const saveEdit = async (id: string, type: 'income' | 'expense') => {
+        const collectionName = type === 'income' ? 'budget_incomes' : 'budget_expenses';
+        try {
+            await updateDoc(doc(db, collectionName, id), {
+                name: editForm.name,
+                category: editForm.category
+            });
+            setEditingId(null);
+        } catch (e) {
+            console.error("Error updating item details", e);
+        }
+    };
+
     // --- Calculations ---
 
     // 1. Current View Totals
-    const currentMonthIncome = useMemo(() => incomes.reduce((sum, item) => sum + getMonthlyAmount(item, selectedMonth), 0), [incomes, selectedMonth]);
-    const currentMonthExpenseTotal = useMemo(() => expenses.reduce((sum, item) => sum + getMonthlyAmount(item, selectedMonth), 0), [expenses, selectedMonth]);
-    const currentMonthSavingsAllocated = useMemo(() => expenses.filter(e => e.category === 'savings').reduce((sum, item) => sum + getMonthlyAmount(item, selectedMonth), 0), [expenses, selectedMonth]);
+    // 1. Current View Totals (Reactive to Filters)
+    const currentMonthIncome = useMemo(() => filteredIncomes.reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, selectedMonth), 0), [filteredIncomes, selectedMonth, selectedYear]);
+    const currentMonthExpenseTotal = useMemo(() => filteredExpenses.reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, selectedMonth), 0), [filteredExpenses, selectedMonth, selectedYear]);
+
+    // Updated Savings Definition: Category 'savings' OR has a linkedSavingsId
+    const currentMonthSavingsAllocated = useMemo(() =>
+        filteredExpenses.filter(e => e.category === 'savings' || !!e.linkedSavingsId)
+            .reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, selectedMonth), 0)
+        , [filteredExpenses, selectedMonth, selectedYear]);
+
+    // Consumption = Total Expenses - Savings (This assumes Savings are included in Total Expenses)
+    // If Total Expenses includes Savings, then consumption is the remainder.
     const currentMonthConsumption = currentMonthExpenseTotal - currentMonthSavingsAllocated;
     const currentNetFlow = currentMonthIncome - currentMonthExpenseTotal; // Unallocated cash
 
-    // 2. Yearly Totals
-    const yearIncomeTotal = useMemo(() => incomes.reduce((sum, item) => sum + Object.values(item.monthlyAmounts).reduce((a, b) => a + b, 0), 0), [incomes]);
-    const yearExpenseTotal = useMemo(() => expenses.reduce((sum, item) => sum + Object.values(item.monthlyAmounts).reduce((a, b) => a + b, 0), 0), [expenses]);
+    // 2. Yearly Totals (For Selected Year)
+    // 2. Yearly Totals (For Selected Year) - Reactive to Filters
+    const yearIncomeTotal = useMemo(() => {
+        return filteredIncomes.reduce((sum, item) => {
+            let itemYearSum = 0;
+            for (let m = 0; m < 12; m++) itemYearSum += getMonthlyAmount(item, selectedYear, m);
+            return sum + itemYearSum;
+        }, 0);
+    }, [filteredIncomes, selectedYear]);
 
-    // 3. Savings Accumulation (Running Balance)
-    const getSavingsBalance = (savingsId: string, monthIndex: number) => {
+    const yearExpenseTotal = useMemo(() => {
+        return filteredExpenses.reduce((sum, item) => {
+            let itemYearSum = 0;
+            for (let m = 0; m < 12; m++) itemYearSum += getMonthlyAmount(item, selectedYear, m);
+            return sum + itemYearSum;
+        }, 0);
+    }, [filteredExpenses, selectedYear]);
+
+    // 3. Savings Accumulation (Running Balance from Start of 2026)
+    const getSavingsBalance = (savingsId: string, currentYear: number, currentMonth: number) => {
         const account = savings.find(s => s.id === savingsId);
         if (!account) return 0;
 
@@ -153,11 +266,14 @@ export default function Budget() {
         // Find all expenses linked to this savings account
         const linkedExpenses = expenses.filter(e => e.linkedSavingsId === savingsId);
 
-        // Sum up contributions from Jan (0) to monthIndex
-        for (let m = 0; m <= monthIndex; m++) {
-            linkedExpenses.forEach(exp => {
-                total += (exp.monthlyAmounts[m] || 0);
-            });
+        // Sum up contributions from 2026 Jan to currentYear/currentMonth
+        for (let y = BASE_YEAR; y <= currentYear; y++) {
+            const limitMonth = (y === currentYear) ? currentMonth : 11;
+            for (let m = 0; m <= limitMonth; m++) {
+                linkedExpenses.forEach(exp => {
+                    total += getMonthlyAmount(exp, y, m);
+                });
+            }
         }
         return total;
     };
@@ -168,30 +284,37 @@ export default function Budget() {
         if (!newItem.name || !newItem.amount || !newItem.category) return;
 
         const amount = parseFloat(newItem.amount);
-        const monthlyAmounts: Record<number, number> = {};
+        const monthlyAmounts: Record<string, number> = {};
         const isRecurring = newItem.isRecurring;
         const oneTimeMonth = newItem.oneTimeMonth === '' ? selectedMonth : parseInt(newItem.oneTimeMonth);
         const lastMonth = newItem.lastOccurringMonth === '' ? 11 : parseInt(newItem.lastOccurringMonth);
 
-        // Initialize all to 0
-        for (let i = 0; i < 12; i++) monthlyAmounts[i] = 0;
-
+        // Populate initial values for the selected year
         if (!isRecurring) {
             // One time
-            monthlyAmounts[oneTimeMonth] = amount;
+            monthlyAmounts[`${selectedYear}-${oneTimeMonth}`] = amount;
         } else {
-            // Recurring logic
+            // Recurring logic - pre-fill selected year
             let step = 1;
             if (newItem.recurrenceFrequency === 'quarterly') step = 3;
             else if (newItem.recurrenceFrequency === 'semiannual') step = 6;
             else if (newItem.recurrenceFrequency === 'yearly') step = 12;
 
-            // Start usually at Jan (0) for budget planning? 
-            // Or should we ask for "Start Month"? Assuming Start Jan for now as per typical Annual Budget
-            // Using loop to fill
+            // Anchor recurrence to Jan of selectedYear for the initial fill loop.
+            // Note: global recurrence calculation anchors to BASE_YEAR (2026). 
+            // If selectedYear > BASE_YEAR, we should ideally check phase.
+            // But for simplicity of "Starting a new item", we fill valid slots in this year.
+
+            // Calculate starting month index relative to Jan of selectedYear
+            // If we want it to start NOW (selectedMonth)? Usually budget items start Jan regardless.
+            // Let's stick to 0 (Jan) start logic.
+
             for (let i = 0; i < 12; i += step) {
-                if (i <= lastMonth) {
-                    monthlyAmounts[i] = amount;
+                // Logic check: if this year is 2026, and lastMonth is set, respect it.
+                // If year > 2026 and item implies infinite, fill all.
+                const isLimited = (newItem.lastOccurringMonth !== '');
+                if (!isLimited || i <= lastMonth) {
+                    monthlyAmounts[`${selectedYear}-${i}`] = amount;
                 }
             }
         }
@@ -206,7 +329,8 @@ export default function Budget() {
             recurrenceFrequency: isRecurring ? newItem.recurrenceFrequency : undefined,
             lastOccurringMonth: (isRecurring && newItem.lastOccurringMonth !== '') ? lastMonth : undefined,
             oneTimeMonth: !isRecurring ? oneTimeMonth : undefined,
-            monthlyAmounts
+            monthlyAmounts,
+            startYear: selectedYear
         };
 
         const cleanItem = Object.fromEntries(Object.entries(newItemObj).filter(([_, v]) => v !== undefined));
@@ -299,16 +423,49 @@ export default function Budget() {
                 <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                     <div>
                         <h2 className="text-2xl font-bold text-brand-primary flex items-center gap-2">
-                            <Wallet className="w-6 h-6" /> Budget {selectedYear}
+                            <Wallet className="w-6 h-6" /> Budget
+                            <div className="flex bg-slate-100 rounded-lg p-1 gap-1 ml-2">
+                                {YEARS.map(y => (
+                                    <button
+                                        key={y}
+                                        onClick={() => setSelectedYear(y)}
+                                        className={clsx(
+                                            "px-2 py-0.5 text-xs font-bold rounded-md transition-all",
+                                            selectedYear === y ? "bg-white text-brand-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                        )}
+                                    >
+                                        {y}
+                                    </button>
+                                ))}
+                            </div>
                         </h2>
                         <div className="flex items-center gap-2 mt-1">
                             <button onClick={() => setSelectedMonth((m) => (m === 0 ? 11 : m - 1))} className="p-1 hover:bg-slate-100 rounded-full"><ChevronLeft size={16} /></button>
-                            <span className="font-bold text-slate-700 w-24 text-center select-none">{MONTHS[selectedMonth]}</span>
+                            <span className="font-bold text-slate-700 w-24 text-center select-none">{MONTHS[selectedMonth]} {selectedYear}</span>
                             <button onClick={() => setSelectedMonth((m) => (m === 11 ? 0 : m + 1))} className="p-1 hover:bg-slate-100 rounded-full"><ChevronRight size={16} /></button>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => navigate('/budget/analytics')}
+                            className="p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 transition-colors"
+                            title="Budget Analytics"
+                        >
+                            <PieChart size={20} />
+                        </button>
+                        <button
+                            onClick={() => setShowFilters(!showFilters)}
+                            className={clsx("p-2 rounded-lg transition-colors border relative", showFilters || selectedCategories.length > 0 ? "bg-indigo-50 border-indigo-200 text-indigo-600" : "bg-white border-transparent hover:bg-slate-50")}
+                            title="Filter Categories"
+                        >
+                            <Filter size={20} />
+                            {selectedCategories.length > 0 && (
+                                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-600 text-[10px] text-white font-bold">
+                                    {selectedCategories.length}
+                                </span>
+                            )}
+                        </button>
                         <button
                             onClick={() => setShowCategorySettings(!showCategorySettings)}
                             className={clsx("p-2 rounded-lg transition-colors border", showCategorySettings ? "bg-slate-100 border-slate-300" : "bg-white border-transparent hover:bg-slate-50")}
@@ -332,6 +489,38 @@ export default function Budget() {
                         </div>
                     </div>
                 </header>
+
+                {/* Filters Panel */}
+                {showFilters && (
+                    <Card className="animate-in slide-in-from-top-2 border-indigo-100 bg-indigo-50/50">
+                        <div className="flex justify-between items-center mb-3">
+                            <h3 className="font-bold text-indigo-900 text-sm flex items-center gap-2"><Filter size={16} /> Filter by Category</h3>
+                            {selectedCategories.length > 0 && <button onClick={() => setSelectedCategories([])} className="text-xs text-indigo-400 hover:text-indigo-600">Clear All</button>}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {allCategories.map(cat => {
+                                const isSelected = selectedCategories.includes(cat);
+                                return (
+                                    <button
+                                        key={cat}
+                                        onClick={() => {
+                                            if (isSelected) setSelectedCategories(selectedCategories.filter(c => c !== cat));
+                                            else setSelectedCategories([...selectedCategories, cat]);
+                                        }}
+                                        className={clsx(
+                                            "px-2 py-1 rounded text-xs border transition-all",
+                                            isSelected
+                                                ? "bg-indigo-600 text-white border-indigo-600 font-bold shadow-sm"
+                                                : "bg-white text-slate-600 border-slate-200 hover:border-indigo-300"
+                                        )}
+                                    >
+                                        {cat}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </Card>
+                )}
 
                 {/* 2. Category Settings Modal/Panel */}
                 {showCategorySettings && (
@@ -468,27 +657,63 @@ export default function Budget() {
                         <Card>
                             <div className="flex justify-between items-center mb-4">
                                 <CardTitle className="text-emerald-700 mb-0">Income</CardTitle>
-                                <div className="text-xs text-slate-400">
-                                    Edit items for <span className="font-bold text-emerald-600">{MONTHS[selectedMonth]}</span>
+                                <div className="flex items-center gap-4">
+                                    <div className="text-sm font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
+                                        CHF {currentMonthIncome.toLocaleString()}
+                                    </div>
+                                    <div className="text-xs text-slate-400">
+                                        {MONTHS[selectedMonth]} {selectedYear}
+                                    </div>
                                 </div>
                             </div>
                             <div className="space-y-3">
-                                {incomes.map(item => (
+                                {filteredIncomes.map(item => (
                                     <div key={item.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg group border border-transparent hover:border-emerald-200 transition-colors">
                                         <div className="flex-1">
-                                            <p className="font-bold text-slate-700 text-sm">{item.name}</p>
-                                            <span className="text-[10px] uppercase font-bold bg-white text-slate-400 px-1.5 py-0.5 rounded border border-slate-100">{item.category}</span>
+                                            {editingId === item.id ? (
+                                                <div className="flex flex-col gap-1">
+                                                    <input
+                                                        className="px-2 py-1 text-sm border rounded"
+                                                        value={editForm.name}
+                                                        onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                                                    />
+                                                    <select
+                                                        className="px-2 py-1 text-xs border rounded"
+                                                        value={editForm.category}
+                                                        onChange={e => setEditForm({ ...editForm, category: e.target.value })}
+                                                    >
+                                                        {incomeCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                                                    </select>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <p className="font-bold text-slate-700 text-sm">{item.name}</p>
+                                                    <span className="text-[10px] uppercase font-bold bg-white text-slate-400 px-1.5 py-0.5 rounded border border-slate-100">{item.category}</span>
+                                                </>
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <span className="text-xs font-bold text-slate-400">CHF</span>
                                             <input
                                                 type="number"
-                                                value={getMonthlyAmount(item, selectedMonth)}
-                                                onChange={(e) => updateMonthlyAmount(item.id, 'income', selectedMonth, parseFloat(e.target.value) || 0)}
+                                                value={getMonthlyAmount(item, selectedYear, selectedMonth)}
+                                                onChange={(e) => updateMonthlyAmount(item.id, 'income', selectedYear, selectedMonth, parseFloat(e.target.value) || 0)}
                                                 className="w-24 px-2 py-1 text-right font-mono font-bold text-emerald-600 bg-white border border-slate-200 rounded focus:ring-1 focus:ring-emerald-500 outline-none"
                                             />
                                         </div>
-                                        <button onClick={() => deleteItem(item.id, 'income')} className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            {editingId === item.id ? (
+                                                <>
+                                                    <button onClick={() => saveEdit(item.id, 'income')} className="p-1 text-emerald-500 hover:bg-emerald-100 rounded"><Check size={14} /></button>
+                                                    <button onClick={cancelEditing} className="p-1 text-slate-400 hover:bg-slate-200 rounded"><X size={14} /></button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button onClick={() => startEditing(item)} className="p-1 text-slate-300 hover:text-slate-600"><Pencil size={14} /></button>
+                                                    <button onClick={() => deleteItem(item.id, 'income')} className="p-1 text-slate-300 hover:text-red-500"><Trash2 size={14} /></button>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
 
@@ -567,37 +792,73 @@ export default function Budget() {
                         <Card>
                             <div className="flex justify-between items-center mb-4">
                                 <CardTitle className="text-rose-700 mb-0">Expenses</CardTitle>
-                                <div className="text-xs text-slate-400">
-                                    Edit items for <span className="font-bold text-rose-600">{MONTHS[selectedMonth]}</span>
+                                <div className="flex items-center gap-4">
+                                    <div className="text-sm font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded">
+                                        CHF {currentMonthExpenseTotal.toLocaleString()}
+                                    </div>
+                                    <div className="text-xs text-slate-400">
+                                        {MONTHS[selectedMonth]} {selectedYear}
+                                    </div>
                                 </div>
                             </div>
                             <div className="space-y-3">
-                                {expenses.map(item => (
+                                {filteredExpenses.map(item => (
                                     <div key={item.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg group border border-transparent hover:border-rose-200 transition-colors">
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <p className="font-bold text-slate-700 text-sm truncate">{item.name}</p>
-                                                {item.category === 'savings' && <span className="text-[8px] uppercase font-black bg-indigo-100 text-indigo-500 px-1.5 py-0.5 rounded-full flex-shrink-0">Savings</span>}
-                                            </div>
-                                            <div className="flex items-center gap-1 overflow-hidden">
-                                                <span className="text-[10px] uppercase font-bold bg-white text-slate-400 px-1.5 py-0.5 rounded border border-slate-100 truncate">{item.category}</span>
-                                                {item.linkedSavingsId && (
-                                                    <span className="text-[10px] text-indigo-400 truncate flex items-center gap-0.5 max-w-[100px]">
-                                                        → {savings.find(s => s.id === item.linkedSavingsId)?.name}
-                                                    </span>
-                                                )}
-                                            </div>
+                                            {editingId === item.id ? (
+                                                <div className="flex flex-col gap-1">
+                                                    <input
+                                                        className="px-2 py-1 text-sm border rounded"
+                                                        value={editForm.name}
+                                                        onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                                                    />
+                                                    <select
+                                                        className="px-2 py-1 text-xs border rounded"
+                                                        value={editForm.category}
+                                                        onChange={e => setEditForm({ ...editForm, category: e.target.value })}
+                                                    >
+                                                        {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                                                    </select>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="font-bold text-slate-700 text-sm truncate">{item.name}</p>
+                                                        {item.category === 'savings' && <span className="text-[8px] uppercase font-black bg-indigo-100 text-indigo-500 px-1.5 py-0.5 rounded-full flex-shrink-0">Savings</span>}
+                                                    </div>
+                                                    <div className="flex items-center gap-1 overflow-hidden">
+                                                        <span className="text-[10px] uppercase font-bold bg-white text-slate-400 px-1.5 py-0.5 rounded border border-slate-100 truncate">{item.category}</span>
+                                                        {item.linkedSavingsId && (
+                                                            <span className="text-[10px] text-indigo-400 truncate flex items-center gap-0.5 max-w-[100px]">
+                                                                → {savings.find(s => s.id === item.linkedSavingsId)?.name}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <span className="text-xs font-bold text-slate-400">CHF</span>
                                             <input
                                                 type="number"
-                                                value={getMonthlyAmount(item, selectedMonth)}
-                                                onChange={(e) => updateMonthlyAmount(item.id, 'expense', selectedMonth, parseFloat(e.target.value) || 0)}
+                                                value={getMonthlyAmount(item, selectedYear, selectedMonth)}
+                                                onChange={(e) => updateMonthlyAmount(item.id, 'expense', selectedYear, selectedMonth, parseFloat(e.target.value) || 0)}
                                                 className="w-24 px-2 py-1 text-right font-mono font-bold text-rose-600 bg-white border border-slate-200 rounded focus:ring-1 focus:ring-rose-500 outline-none"
                                             />
                                         </div>
-                                        <button onClick={() => deleteItem(item.id, 'expense')} className="p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            {editingId === item.id ? (
+                                                <>
+                                                    <button onClick={() => saveEdit(item.id, 'expense')} className="p-1 text-emerald-500 hover:bg-emerald-100 rounded"><Check size={14} /></button>
+                                                    <button onClick={cancelEditing} className="p-1 text-slate-400 hover:bg-slate-200 rounded"><X size={14} /></button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button onClick={() => startEditing(item)} className="p-1 text-slate-300 hover:text-slate-600"><Pencil size={14} /></button>
+                                                    <button onClick={() => deleteItem(item.id, 'expense')} className="p-1 text-slate-300 hover:text-red-500"><Trash2 size={14} /></button>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
 
@@ -691,7 +952,7 @@ export default function Budget() {
                     </div>
                 ) : (
                     <Card className="overflow-x-auto">
-                        <CardTitle>Annual Grid View</CardTitle>
+                        <CardTitle>Annual Grid View {selectedYear}</CardTitle>
                         <table className="w-full text-sm text-left border-collapse">
                             <thead>
                                 <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
@@ -703,7 +964,7 @@ export default function Budget() {
                             <tbody>
                                 {/* Incomes */}
                                 <tr className="bg-emerald-50/50 border-b border-emerald-100"><td colSpan={14} className="p-2 font-bold text-emerald-700 text-xs uppercase tracking-wider pl-3">Income</td></tr>
-                                {incomes.map(item => (
+                                {filteredIncomes.map(item => (
                                     <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
                                         <td className="p-3 font-medium text-slate-700 sticky left-0 bg-white group-hover:bg-slate-50 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                                             {item.name}
@@ -713,14 +974,14 @@ export default function Budget() {
                                             <td key={idx} className="p-1">
                                                 <input
                                                     type="number"
-                                                    value={item.monthlyAmounts[idx]}
-                                                    onChange={(e) => updateMonthlyAmount(item.id, 'income', idx, parseFloat(e.target.value) || 0)}
+                                                    value={getMonthlyAmount(item, selectedYear, idx)}
+                                                    onChange={(e) => updateMonthlyAmount(item.id, 'income', selectedYear, idx, parseFloat(e.target.value) || 0)}
                                                     className="w-full text-right bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-emerald-300 rounded px-1 py-1 outline-none text-slate-600 focus:text-emerald-700 font-mono text-xs"
                                                 />
                                             </td>
                                         ))}
                                         <td className="p-1 font-bold text-right text-emerald-700 bg-slate-50/50">
-                                            {Object.values(item.monthlyAmounts).reduce((a, b) => a + b, 0).toLocaleString()}
+                                            {MONTHS.reduce((sum, _, m) => sum + getMonthlyAmount(item, selectedYear, m), 0).toLocaleString()}
                                         </td>
                                     </tr>
                                 ))}
@@ -739,18 +1000,84 @@ export default function Budget() {
                                             <td key={idx} className="p-1">
                                                 <input
                                                     type="number"
-                                                    value={item.monthlyAmounts[idx]}
-                                                    onChange={(e) => updateMonthlyAmount(item.id, 'expense', idx, parseFloat(e.target.value) || 0)}
+                                                    value={getMonthlyAmount(item, selectedYear, idx)}
+                                                    onChange={(e) => updateMonthlyAmount(item.id, 'expense', selectedYear, idx, parseFloat(e.target.value) || 0)}
                                                     className="w-full text-right bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-rose-300 rounded px-1 py-1 outline-none text-slate-600 focus:text-rose-700 font-mono text-xs"
                                                 />
                                             </td>
                                         ))}
                                         <td className="p-1 font-bold text-right text-rose-700 bg-slate-50/50">
-                                            {Object.values(item.monthlyAmounts).reduce((a, b) => a + b, 0).toLocaleString()}
+                                            {MONTHS.reduce((sum, _, m) => sum + getMonthlyAmount(item, selectedYear, m), 0).toLocaleString()}
                                         </td>
                                     </tr>
                                 ))}
                             </tbody>
+                            {/* Yearly Grid Footer with Summary Rows */}
+                            <tfoot className="border-t-2 border-slate-300">
+                                {/* Total Income Row */}
+                                <tr className="bg-emerald-50">
+                                    <td className="p-3 font-bold text-emerald-800 sticky left-0 bg-emerald-50 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Total Income</td>
+                                    {MONTHS.map((_, m) => {
+                                        const val = filteredIncomes.reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, m), 0);
+                                        return <td key={m} className="p-2 text-right font-bold text-emerald-700 text-xs">{val.toLocaleString()}</td>
+                                    })}
+                                    <td className="p-2 text-right font-black text-emerald-900 bg-emerald-100">
+                                        {yearIncomeTotal.toLocaleString()}
+                                    </td>
+                                </tr>
+                                {/* Total Savings Row */}
+                                <tr className="bg-indigo-50">
+                                    <td className="p-3 font-bold text-indigo-800 sticky left-0 bg-indigo-50 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Total Savings</td>
+                                    {MONTHS.map((_, m) => {
+                                        const val = filteredExpenses
+                                            .filter(e => e.category === 'savings' || !!e.linkedSavingsId)
+                                            .reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, m), 0);
+                                        return <td key={m} className="p-2 text-right font-bold text-indigo-700 text-xs">{val.toLocaleString()}</td>
+                                    })}
+                                    <td className="p-2 text-right font-black text-indigo-900 bg-indigo-100">
+                                        {filteredExpenses.filter(e => e.category === 'savings' || !!e.linkedSavingsId)
+                                            .reduce((sum, item) => {
+                                                let itemYearSum = 0;
+                                                for (let m = 0; m < 12; m++) itemYearSum += getMonthlyAmount(item, selectedYear, m);
+                                                return sum + itemYearSum;
+                                            }, 0).toLocaleString()}
+                                    </td>
+                                </tr>
+                                {/* Total Expenses (Consumption) Row - Expenses excluding Savings */}
+                                <tr className="bg-rose-50">
+                                    <td className="p-3 font-bold text-rose-800 sticky left-0 bg-rose-50 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Expenses (Cons.)</td>
+                                    {MONTHS.map((_, m) => {
+                                        // Total Expenses minus Savings
+                                        const totalExp = filteredExpenses.reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, m), 0);
+                                        const savingsExp = filteredExpenses
+                                            .filter(e => e.category === 'savings' || !!e.linkedSavingsId)
+                                            .reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, m), 0);
+                                        return <td key={m} className="p-2 text-right font-bold text-rose-700 text-xs">{(totalExp - savingsExp).toLocaleString()}</td>
+                                    })}
+                                    <td className="p-2 text-right font-black text-rose-900 bg-rose-100">
+                                        {/* Year Total Consumption */}
+                                        {(filteredExpenses.reduce((sum, item) => {
+                                            let s = 0; for (let m = 0; m < 12; m++) s += getMonthlyAmount(item, selectedYear, m); return sum + s;
+                                        }, 0) -
+                                            filteredExpenses.filter(e => e.category === 'savings' || !!e.linkedSavingsId).reduce((sum, item) => {
+                                                let s = 0; for (let m = 0; m < 12; m++) s += getMonthlyAmount(item, selectedYear, m); return sum + s;
+                                            }, 0)).toLocaleString()}
+                                    </td>
+                                </tr>
+                                {/* Delta Row (Net Flow) */}
+                                <tr className="bg-slate-100 border-t border-slate-300">
+                                    <td className="p-3 font-black text-slate-800 sticky left-0 bg-slate-100 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Delta</td>
+                                    {MONTHS.map((_, m) => {
+                                        const inc = filteredIncomes.reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, m), 0);
+                                        const exp = filteredExpenses.reduce((sum, item) => sum + getMonthlyAmount(item, selectedYear, m), 0);
+                                        const delta = inc - exp;
+                                        return <td key={m} className={clsx("p-2 text-right font-black text-xs", delta >= 0 ? "text-blue-600" : "text-orange-600")}>{delta.toLocaleString()}</td>
+                                    })}
+                                    <td className={clsx("p-2 text-right font-black bg-slate-200", (yearIncomeTotal - yearExpenseTotal) >= 0 ? "text-blue-800" : "text-orange-800")}>
+                                        {(yearIncomeTotal - yearExpenseTotal).toLocaleString()}
+                                    </td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </Card>
                 )
@@ -759,12 +1086,12 @@ export default function Budget() {
                 {/* 5. Savings Projection (Live Accumulation) */}
                 <Card className="bg-gradient-to-br from-indigo-50 to-white border-indigo-100">
                     <CardTitle className="text-indigo-800 flex items-center justify-between">
-                        <div className="flex items-center gap-2"><PiggyBank size={20} /> Simulated Savings Balance ({MONTHS[selectedMonth]})</div>
+                        <div className="flex items-center gap-2"><PiggyBank size={20} /> Simulated Savings Balance ({MONTHS[selectedMonth]} {selectedYear})</div>
                         <div className="text-xs font-normal text-indigo-400">Projections based on budget entries</div>
                     </CardTitle>
                     <div className="space-y-4">
                         {savings.map(acc => {
-                            const currentBalance = getSavingsBalance(acc.id, selectedMonth);
+                            const currentBalance = getSavingsBalance(acc.id, selectedYear, selectedMonth);
                             const percent = Math.min((currentBalance / acc.yearlyGoal) * 100, 100);
 
                             return (
@@ -789,7 +1116,7 @@ export default function Budget() {
                     </div>
                 </Card>
 
-            </div >
-        </Layout >
+            </div>
+        </Layout>
     );
 }

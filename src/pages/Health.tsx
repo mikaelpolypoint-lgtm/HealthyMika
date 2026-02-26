@@ -1,14 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Layout } from "../components/Layout";
 import { Card, CardTitle } from "../components/Ui";
-import { collection, query, orderBy, onSnapshot, limit, Timestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import { subDays, format } from 'date-fns';
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addWeeks, subWeeks, addMonths, subMonths, getISOWeek } from 'date-fns';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-    PieChart, Pie, Cell, Legend
+    PieChart, Pie, Cell, Legend, ComposedChart, Bar, Tooltip
 } from 'recharts';
-import { Scale, Apple, Activity, TrendingDown, TrendingUp } from 'lucide-react';
+import { Scale, Apple, Activity, TrendingDown, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 
 // --- Interfaces ---
@@ -45,21 +45,26 @@ const COLOR_LABELS = {
     'dark-red': 'Excessive'
 };
 
+type TimeFilter = 'week' | 'month' | 'year';
+
 export default function Health() {
+    const [timeFilter, setTimeFilter] = useState<TimeFilter>('week');
+    const [currentDate, setCurrentDate] = useState(new Date());
+
     const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
     const [foodLogs, setFoodLogs] = useState<DailyFoodLog[]>([]);
     const [goalWeight, setGoalWeight] = useState(85); // Default, ideally fetch from goals
 
     // --- Fetch Data ---
     useEffect(() => {
-        // Fetch Weight Logs (Last 90 days for trend)
-        const qWeight = query(collection(db, 'weight_logs'), orderBy('date', 'desc'), limit(90));
+        // Fetch Weight Logs (Unlimited for full timeframe visibility)
+        const qWeight = query(collection(db, 'weight_logs'), orderBy('date', 'desc'));
         const unsubWeight = onSnapshot(qWeight, (snap) => {
             setWeightLogs(snap.docs.map(d => ({ id: d.id, ...d.data() } as WeightLog)).reverse()); // Reverse for chart (oldest first)
         });
 
-        // Fetch Food Logs (Last 90 days)
-        const qFood = query(collection(db, 'day_food_logs'), orderBy('date', 'desc'), limit(90));
+        // Fetch Food Logs
+        const qFood = query(collection(db, 'day_food_logs'), orderBy('date', 'desc'));
         const unsubFood = onSnapshot(qFood, (snap) => {
             setFoodLogs(snap.docs.map(d => d.data() as DailyFoodLog));
         });
@@ -74,19 +79,65 @@ export default function Health() {
         return () => { unsubWeight(); unsubFood(); unsubGoals(); };
     }, []);
 
+    // --- Filters & Navigation ---
+    const START_OF_YEAR = new Date('2025-12-28');
+
+    const dateRange = useMemo(() => {
+        if (timeFilter === 'week') {
+            return {
+                start: startOfWeek(currentDate, { weekStartsOn: 1 }),
+                end: endOfWeek(currentDate, { weekStartsOn: 1 })
+            };
+        } else if (timeFilter === 'month') {
+            return {
+                start: startOfMonth(currentDate),
+                end: endOfMonth(currentDate)
+            };
+        } else {
+            return { start: START_OF_YEAR, end: new Date('2026-12-31') };
+        }
+    }, [timeFilter, currentDate]);
+
+    const handlePrev = () => {
+        if (timeFilter === 'week') setCurrentDate(d => subWeeks(d, 1));
+        if (timeFilter === 'month') setCurrentDate(d => subMonths(d, 1));
+    };
+
+    const handleNext = () => {
+        if (timeFilter === 'week') setCurrentDate(d => addWeeks(d, 1));
+        if (timeFilter === 'month') setCurrentDate(d => addMonths(d, 1));
+    };
+
+    const periodLabel = useMemo(() => {
+        if (timeFilter === 'week') return `Week ${getISOWeek(currentDate)} (${format(dateRange.start, 'MMM d')} - ${format(dateRange.end, 'MMM d')})`;
+        if (timeFilter === 'month') return format(currentDate, 'MMMM yyyy');
+        return '2026 Season';
+    }, [timeFilter, currentDate, dateRange]);
+
+
     // --- Analytics ---
 
     // Weight Stats
-    const currentWeight = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : 0;
-    const initialWeight = weightLogs.length > 0 ? weightLogs[0].weight : 0;
-    const weightDiff = currentWeight - initialWeight;
+    // Weight Stats
+    const filteredWeightLogs = useMemo(() => {
+        return weightLogs.filter(l => {
+            const d = l.date.toDate();
+            return d >= dateRange.start && d <= dateRange.end;
+        });
+    }, [weightLogs, dateRange]);
+
+    const currentWeight = filteredWeightLogs.length > 0 ? filteredWeightLogs[filteredWeightLogs.length - 1].weight : (weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : 0);
+    const initialWeight = filteredWeightLogs.length > 0 ? filteredWeightLogs[0].weight : 0;
+    const weightDiff = currentWeight - (initialWeight || currentWeight);
     const distToGoal = currentWeight - goalWeight;
 
-    // Diet Stats (Last 30 days)
+    // Diet Stats (Filtered Range)
     const recentFoodLogs = useMemo(() => {
-        const thirtyDaysAgo = subDays(new Date(), 30);
-        return foodLogs.filter(l => new Date(l.date) >= thirtyDaysAgo);
-    }, [foodLogs]);
+        return foodLogs.filter(l => {
+            const d = new Date(l.date);
+            return d >= dateRange.start && d <= dateRange.end;
+        });
+    }, [foodLogs, dateRange]);
 
     const dietQuality = useMemo(() => {
         if (recentFoodLogs.length === 0) return { good: 0, bad: 0, score: 0 };
@@ -107,12 +158,81 @@ export default function Health() {
 
     // Chart Data Preparation
     const weightChartData = useMemo(() => {
-        return weightLogs.map(l => ({
+        return filteredWeightLogs.map(l => ({
             date: format(l.date.toDate(), 'MMM d'),
             weight: l.weight,
             goal: goalWeight
         }));
-    }, [weightLogs, goalWeight]);
+    }, [filteredWeightLogs, goalWeight]);
+
+    const correlationData = useMemo(() => {
+        if (!dateRange.start || !dateRange.end) return [];
+
+        const combinedMap = new Map();
+        const sortedWeights = [...weightLogs]; // Already fetched oldest first internally, wait: fetch is desc, then .reverse() is applied. So it's oldest first.
+
+        let tempDate = new Date(dateRange.start);
+        const endD = new Date(dateRange.end);
+        const refToday = new Date();
+        const capDate = endD > refToday ? refToday : endD;
+
+        while (tempDate <= capDate) {
+            const dStr = format(tempDate, 'yyyy-MM-dd');
+            combinedMap.set(dStr, {
+                date: dStr,
+                displayDate: format(tempDate, 'MMM d'),
+                weight: null,
+                foodScore: 0,
+                foodHex: '#f1f5f9',
+                rawColor: 'none'
+            });
+            tempDate.setDate(tempDate.getDate() + 1);
+        }
+
+        let lastKnownWeight: number | null = null;
+        const priorWeights = sortedWeights.filter(w => w.date.toDate() < dateRange.start);
+        if (priorWeights.length > 0) {
+            lastKnownWeight = priorWeights[priorWeights.length - 1].weight;
+        }
+
+        tempDate = new Date(dateRange.start);
+        while (tempDate <= capDate) {
+            const dStr = format(tempDate, 'yyyy-MM-dd');
+            const mapItem = combinedMap.get(dStr);
+            if (mapItem) {
+                const logsForDay = sortedWeights.filter(w => format(w.date.toDate(), 'yyyy-MM-dd') === dStr);
+                if (logsForDay.length > 0) {
+                    lastKnownWeight = logsForDay[logsForDay.length - 1].weight;
+                }
+                mapItem.weight = lastKnownWeight;
+            }
+            tempDate.setDate(tempDate.getDate() + 1);
+        }
+
+        const colorScoreMap: Record<string, { score: number, hex: string }> = {
+            'dark-green': { score: 5, hex: '#047857' },
+            'light-green': { score: 4, hex: '#34d399' },
+            'yellow': { score: 3, hex: '#facc15' },
+            'orange': { score: 2, hex: '#fb923c' },
+            'red': { score: 1, hex: '#ef4444' },
+            'dark-red': { score: 0, hex: '#7f1d1d' },
+        };
+
+        recentFoodLogs.forEach(log => {
+            const logDateStr = log.date;
+            if (combinedMap.has(logDateStr)) {
+                const mapItem = combinedMap.get(logDateStr);
+                const colorData = colorScoreMap[log.caloriesColor];
+                if (colorData) {
+                    mapItem.foodScore = colorData.score;
+                    mapItem.foodHex = colorData.hex;
+                    mapItem.rawColor = log.caloriesColor;
+                }
+            }
+        });
+
+        return Array.from(combinedMap.values());
+    }, [weightLogs, recentFoodLogs, dateRange]);
 
     const foodPieData = useMemo(() => {
         const counts: Record<string, number> = {};
@@ -129,9 +249,35 @@ export default function Health() {
 
     return (
         <Layout>
-            <header className="mb-8">
-                <h2 className="text-3xl font-bold text-brand-primary mb-2">Health Overview ❤️</h2>
-                <p className="text-slate-500">Holistic view of your nutrition and body metrics.</p>
+            <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 className="text-3xl font-bold text-brand-primary mb-2">Health Overview ❤️</h2>
+                    <p className="text-slate-500">Holistic view of your nutrition and body metrics.</p>
+                </div>
+
+                <div className="flex flex-col md:flex-row items-center gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+                    <div className="flex bg-slate-200/50 p-1 rounded-xl">
+                        {(['week', 'month', 'year'] as TimeFilter[]).map((filter) => (
+                            <button
+                                key={filter}
+                                onClick={() => { setTimeFilter(filter); setCurrentDate(new Date()); }}
+                                className={clsx(
+                                    "px-4 py-2 rounded-lg text-sm font-bold capitalize transition-all",
+                                    timeFilter === filter ? "bg-white text-brand-primary shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                )}
+                            >
+                                {filter}
+                            </button>
+                        ))}
+                    </div>
+                    {timeFilter !== 'year' && (
+                        <div className="flex items-center gap-2 px-2">
+                            <button onClick={handlePrev} className="p-2 hover:bg-white rounded-lg text-slate-500 transition-all"><ChevronLeft size={20} /></button>
+                            <span className="text-sm font-bold text-slate-700 min-w-[140px] text-center">{periodLabel}</span>
+                            <button onClick={handleNext} className="p-2 hover:bg-white rounded-lg text-slate-500 transition-all"><ChevronRight size={20} /></button>
+                        </div>
+                    )}
+                </div>
             </header>
 
             {/* Quick Stats Row */}
@@ -144,7 +290,7 @@ export default function Health() {
                             {weightDiff !== 0 && (
                                 <span className={clsx("text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1", weightDiff < 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>
                                     {weightDiff < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                                    {Math.abs(weightDiff).toFixed(1)} kg (90d)
+                                    {Math.abs(weightDiff).toFixed(1)} kg ({timeFilter})
                                 </span>
                             )}
                         </div>
@@ -162,7 +308,7 @@ export default function Health() {
                 <Card className="flex flex-col justify-between">
                     <div>
                         <div className="flex justify-between items-start mb-2">
-                            <h3 className="text-sm font-bold text-slate-500 uppercase flex items-center gap-2"><Apple size={16} /> Diet Quality (30d)</h3>
+                            <h3 className="text-sm font-bold text-slate-500 uppercase flex items-center gap-2"><Apple size={16} /> Diet Quality ({timeFilter})</h3>
                             <span className={clsx("text-xs font-bold px-2 py-1 rounded-full",
                                 dietQuality.score >= 80 ? "bg-emerald-100 text-emerald-700" :
                                     dietQuality.score >= 60 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
@@ -182,7 +328,7 @@ export default function Health() {
                 {/* Habits Card */}
                 <Card className="flex flex-col justify-between">
                     <div>
-                        <h3 className="text-sm font-bold text-slate-500 uppercase flex items-center gap-2 mb-4"><Activity size={16} /> Habit Adherence (30d)</h3>
+                        <h3 className="text-sm font-bold text-slate-500 uppercase flex items-center gap-2 mb-4"><Activity size={16} /> Habit Adherence ({timeFilter})</h3>
                         <div className="space-y-4">
                             <div>
                                 <div className="flex justify-between text-sm mb-1">
@@ -279,6 +425,53 @@ export default function Health() {
                     </div>
                 </Card>
             </div>
+
+            {/* --- CORRELATIONS --- */}
+            <div className="mt-8">
+                <Card className="p-4 md:p-6 overflow-hidden">
+                    <div className="mb-6">
+                        <h4 className="font-bold text-lg text-slate-800">Weight & Food Quality Correlation</h4>
+                        <p className="text-sm text-slate-500">How your eating habits are impacting your weight trend over the selected period.</p>
+                    </div>
+                    <div className="h-[400px] w-full mt-4 -ml-4 pr-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={correlationData} margin={{ top: 20, right: 20, bottom: 20, left: 10 }}>
+                                <CartesianGrid stroke="#f1f5f9" vertical={false} />
+                                <XAxis dataKey="displayDate" stroke="#94a3b8" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                                <YAxis yAxisId="weight" domain={['dataMin - 1', 'dataMax + 1']} stroke="#003A59" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} orientation="left" />
+                                <YAxis yAxisId="food" hide={true} domain={[0, 6]} />
+                                <Tooltip
+                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                    labelStyle={{ fontWeight: 'bold', color: '#334155' }}
+                                    formatter={(value: any, name: any, props: any) => {
+                                        if (name === "Weight") return [`${value} kg`, name];
+                                        if (name === "Food Score") {
+                                            const raw = props.payload.rawColor;
+                                            return [raw && raw !== 'none' ? raw.replace('-', ' ') : 'No data', 'Food Quality'];
+                                        }
+                                        return [value, name];
+                                    }}
+                                />
+                                <Legend iconType="circle" />
+                                <Bar yAxisId="food" dataKey="foodScore" name="Food Score" radius={[4, 4, 0, 0]} barSize={16}>
+                                    {correlationData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.foodHex} />
+                                    ))}
+                                </Bar>
+                                <Line yAxisId="weight" type="monotone" dataKey="weight" name="Weight" stroke="#003A59" strokeWidth={3} dot={{ r: 4, fill: '#003A59', strokeWidth: 2 }} activeDot={{ r: 6 }} connectNulls />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                    <div className="flex gap-4 mt-6 flex-wrap justify-center text-xs text-slate-500 font-medium">
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-emerald-700"></span> Excellent</div>
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-emerald-400"></span> Good</div>
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-400"></span> Okay</div>
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-orange-400"></span> High</div>
+                        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-500"></span> Bad</div>
+                    </div>
+                </Card>
+            </div>
+
         </Layout>
     );
 }

@@ -287,10 +287,6 @@ export default function Dashboard() {
 
 
 
-    // 5. Diagrams Data
-
-
-
     // -- RENDER TARGET GETTERS --
     const t_declutter = getTarget('declutter', timeFilter);
     const t_books = getTarget('books', timeFilter);
